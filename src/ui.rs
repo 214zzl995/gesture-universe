@@ -546,10 +546,24 @@ impl AppView {
     }
 
     fn render_main(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> AnyElement {
-        let theme = cx.theme();
+        // Drain recognizer results first so overlay uses the latest confidence/landmarks.
+        let result_rx = self.result_rx.take();
+        if let Some(rx) = result_rx.as_ref() {
+            while let Ok(result) = rx.try_recv() {
+                self.latest_result = Some(result);
+            }
+        }
+        self.result_rx = result_rx;
 
-        if let Some(rx) = self.frame_rx.as_ref() {
+        // Drain frames without holding an immutable borrow on self while we update state.
+        let frame_rx = self.frame_rx.take();
+        if let Some(rx) = frame_rx.as_ref() {
+            let mut frames = Vec::new();
             while let Ok(frame) = rx.try_recv() {
+                frames.push(frame);
+            }
+
+            for frame in frames {
                 let overlay = self.latest_result.as_ref().and_then(|r| {
                     if r.confidence >= 0.5 {
                         r.landmarks.as_ref().map(|v| v.as_slice())
@@ -558,21 +572,15 @@ impl AppView {
                     }
                 });
 
-                if let Some(image) = frame_to_image(
-                    &frame,
-                    overlay,
-                ) {
+                if let Some(image) = frame_to_image(&frame, overlay) {
                     self.replace_latest_image(image, window, cx);
                 }
                 self.latest_frame = Some(frame);
             }
         }
+        self.frame_rx = frame_rx;
 
-        if let Some(rx) = self.result_rx.as_ref() {
-            while let Ok(result) = rx.try_recv() {
-                self.latest_result = Some(result);
-            }
-        }
+        let theme = cx.theme();
 
         let camera_label = self
             .selected_camera_idx
@@ -757,7 +765,7 @@ impl AppView {
             RecognizerBackend::HandposeTract { .. } => "Tract/ONNX",
         };
 
-        let mut hero_card = v_flex()
+        let hero_card = v_flex()
             .gap_4()
             .p_6()
             .rounded_lg()
