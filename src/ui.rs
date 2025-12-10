@@ -711,6 +711,7 @@ impl AppView {
             img(image.clone())
                 .size_full()
                 .object_fit(ObjectFit::Contain)
+                .rounded_t_lg()
                 .into_any_element()
         } else {
             div()
@@ -720,6 +721,7 @@ impl AppView {
                 .justify_center()
                 .text_sm()
                 .text_color(theme.muted_foreground)
+                .rounded_t_lg()
                 .child("等待摄像头...")
                 .into_any_element()
         };
