@@ -2,9 +2,12 @@ use std::{mem, sync::Arc, thread};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    AnyElement, App, AppContext, Context, InteractiveElement, IntoElement, ObjectFit,
-    ParentElement, Render, RenderImage, SharedString, StatefulInteractiveElement, Styled,
-    StyledImage, Window, WindowOptions, div, img, px, rgb, rgba,
+    AnyElement, App, AppContext, Context, IntoElement, ObjectFit, ParentElement, Render,
+    RenderImage, SharedString, Styled, StyledImage, Window, WindowOptions, div, img, px,
+};
+use gpui_component::{
+    ActiveTheme, Root, Selectable, Sizable, StyledExt, button::{Button, ButtonVariants}, h_flex,
+    tag::Tag, v_flex,
 };
 use image::{Frame as ImageFrame, ImageBuffer, Rgba};
 
@@ -51,8 +54,8 @@ pub fn launch_ui(
     result_tx: Sender<GestureResult>,
     recognizer_backend: RecognizerBackend,
 ) -> gpui::Result<()> {
-    app.open_window(WindowOptions::default(), move |_window, app| {
-        app.new(|_| {
+    app.open_window(WindowOptions::default(), move |window, app| {
+        let view = app.new(|_| {
             AppView::new(
                 frame_rx,
                 result_rx,
@@ -62,7 +65,8 @@ pub fn launch_ui(
                 result_tx,
                 recognizer_backend,
             )
-        })
+        });
+        app.new(|cx| Root::new(view, window, cx))
     })?;
 
     Ok(())
@@ -256,10 +260,27 @@ impl AppView {
         state: &mut CameraState,
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
+        let theme = cx.theme();
         match state {
-            CameraState::Unavailable { message } => div()
-                .child(div().child("没有可用摄像头"))
-                .child(div().child(message.clone()))
+            CameraState::Unavailable { message } => v_flex()
+                .gap_2()
+                .p_4()
+                .rounded_lg()
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.group_box)
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(Tag::danger().rounded_full().small().child("没有可用摄像头"))
+                        .child(
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .child("请检查摄像头连接或权限设置"),
+                        ),
+                )
+                .child(div().text_color(theme.foreground).child(message.clone()))
                 .into_any_element(),
             CameraState::Selection {
                 options,
@@ -280,41 +301,72 @@ impl AppView {
                     }
                 }
 
-                let mut container = div()
-                    .child(div().child("选择摄像头"))
-                    .child(div().child("检测到多个摄像头，请选择要使用的设备："));
+                let list =
+                    options
+                        .iter()
+                        .enumerate()
+                        .fold(v_flex().gap_2(), |list, (idx, device)| {
+                            let is_selected = *selected == idx;
+                            list.child(
+                                Button::new(SharedString::from(format!("camera-option-{idx}")))
+                                    .label(device.label.clone())
+                                    .selected(is_selected)
+                                    .outline()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.select_camera(idx);
+                                        cx.notify();
+                                    })),
+                            )
+                        });
 
-                for (idx, device) in options.iter().enumerate() {
-                    let is_selected = *selected == idx;
-                    let label = device.label.clone();
-                    let option = div()
-                        .id(SharedString::from(format!("camera-option-{idx}")))
-                        .child(format!("{} {label}", if is_selected { "●" } else { "○" }))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.select_camera(idx);
-                            cx.notify();
-                        }));
-                    container = container.child(option);
-                }
-
-                let mut actions = div().child(
-                    div()
-                        .id(SharedString::from("camera-start"))
-                        .child("使用所选摄像头")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.start_selected_camera();
-                            cx.notify();
-                        })),
-                );
+                let mut container = v_flex()
+                    .gap_3()
+                    .p_4()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.group_box)
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(Tag::secondary().rounded_full().small().child("选择摄像头"))
+                            .child(div().text_lg().font_semibold().child("检测到多个摄像头")),
+                    )
+                    .child(
+                        div()
+                            .text_color(theme.muted_foreground)
+                            .child("请选择要使用的设备"),
+                    )
+                    .child(list)
+                    .child(
+                        Button::new(SharedString::from("camera-start"))
+                            .primary()
+                            .label("使用所选摄像头")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.start_selected_camera();
+                                cx.notify();
+                            })),
+                    );
 
                 if let Some(err) = start_error {
-                    actions = actions.child(div().child(format!("无法启动摄像头: {err}")));
+                    container = container.child(
+                        Tag::danger()
+                            .rounded_full()
+                            .child(format!("无法启动摄像头: {err}")),
+                    );
                 }
 
-                container.child(actions).into_any_element()
+                container.into_any_element()
             }
-            CameraState::Ready => div()
-                .child(div().child("正在启动摄像头..."))
+            CameraState::Ready => v_flex()
+                .gap_2()
+                .p_4()
+                .rounded_lg()
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.group_box)
+                .child(Tag::info().rounded_full().child("正在启动摄像头..."))
                 .into_any_element(),
         }
     }
@@ -415,7 +467,12 @@ impl AppView {
         self.recognizer_handle = Some(handle);
     }
 
-    fn render_download_view(&self, state: &DownloadState) -> AnyElement {
+    fn render_download_view(
+        &self,
+        state: &DownloadState,
+        cx: &mut Context<'_, Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
         let bar = progress_bar_string(state.downloaded, state.total);
         let detail = match (state.total, state.finished) {
             (_, true) => "Done".to_string(),
@@ -426,20 +483,68 @@ impl AppView {
             _ => format!("Downloaded {} KB", state.downloaded / 1024),
         };
 
-        let mut container = div()
-            .child(div().child("Preparing handpose model..."))
-            .child(div().child(bar))
-            .child(div().child(detail))
-            .child(div().child(state.message.clone()));
+        let status_tag = if state.finished && state.error.is_none() {
+            Tag::success().rounded_full().small().child("模型就绪")
+        } else if state.error.is_some() {
+            Tag::danger().rounded_full().small().child("模型下载失败")
+        } else {
+            Tag::info().rounded_full().small().child("模型下载中")
+        };
+
+        let mut container = v_flex()
+            .gap_3()
+            .p_6()
+            .rounded_lg()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.group_box)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(status_tag)
+                    .child(div().text_lg().font_semibold().child("准备手势识别模型")),
+            )
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.muted)
+                    .font_family(theme.mono_font_family.clone())
+                    .text_color(theme.foreground)
+                    .child(bar),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child(detail),
+            )
+            .child(
+                div()
+                    .text_color(theme.foreground)
+                    .child(state.message.clone()),
+            );
 
         if let Some(err) = &state.error {
-            container = container.child(div().child(format!("错误: {err}")));
+            container = container.child(Tag::danger().rounded_full().child(format!("错误: {err}")));
         }
 
-        container.into_any_element()
+        v_flex()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .bg(theme.background)
+            .child(container)
+            .into_any_element()
     }
 
     fn render_main(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> AnyElement {
+        let theme = cx.theme();
+
         if let Some(rx) = self.frame_rx.as_ref() {
             while let Ok(frame) = rx.try_recv() {
                 if let Some(image) = frame_to_image(
@@ -472,6 +577,12 @@ impl AppView {
                 }
             });
 
+        let resolution_label = self
+            .latest_frame
+            .as_ref()
+            .map(|f| format!("{}x{}", f.width, f.height))
+            .unwrap_or_else(|| "等待画面".to_string());
+
         let frame_status = self
             .latest_frame
             .as_ref()
@@ -484,15 +595,10 @@ impl AppView {
             .map(|g| format!("手势: {}", g.display_text()))
             .unwrap_or_else(|| "手势: ...".to_string());
 
-        let camera_width = if self.camera_expanded {
-            px(520.0)
+        let (camera_width, camera_height) = if self.camera_expanded {
+            (px(420.0), px(320.0))
         } else {
-            px(240.0)
-        };
-        let camera_height = if self.camera_expanded {
-            px(390.0)
-        } else {
-            px(180.0)
+            (px(260.0), px(190.0))
         };
 
         let frame_view: AnyElement = if let Some(image) = &self.latest_image {
@@ -507,7 +613,7 @@ impl AppView {
                 .items_center()
                 .justify_center()
                 .text_sm()
-                .text_color(rgb(0x9ca3af))
+                .text_color(theme.muted_foreground)
                 .child("等待摄像头...")
                 .into_any_element()
         };
@@ -515,11 +621,11 @@ impl AppView {
         let camera_shell = div()
             .w(camera_width)
             .h(camera_height)
-            .rounded_md()
+            .rounded_lg()
             .border_1()
-            .border_color(rgb(0x2a2a2a))
+            .border_color(theme.border)
             .overflow_hidden()
-            .bg(rgb(0x0b0b0f))
+            .bg(theme.muted)
             .child(frame_view);
 
         let toggle_label = if self.camera_expanded {
@@ -528,33 +634,15 @@ impl AppView {
             "放大画面"
         };
 
-        let mut control_row = div()
-            .w(camera_width)
-            .flex()
-            .justify_between()
-            .items_center()
-            .gap_2()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(rgb(0xe5e7eb))
-                    .child(frame_status.clone()),
-            )
-            .child(
-                div()
-                    .id(SharedString::from("camera-size-toggle"))
-                    .px_3()
-                    .py_2()
-                    .rounded_sm()
-                    .bg(rgb(0x2563eb))
-                    .text_color(rgb(0xffffff))
-                    .cursor_pointer()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.camera_expanded = !this.camera_expanded;
-                        cx.notify();
-                    }))
-                    .child(toggle_label),
-            );
+        let mut control_actions = h_flex().gap_2().child(
+            Button::new(SharedString::from("camera-size-toggle"))
+                .outline()
+                .label(toggle_label)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.camera_expanded = !this.camera_expanded;
+                    cx.notify();
+                })),
+        );
 
         if self.available_cameras.len() > 1 {
             let picker_label = if self.camera_picker_open {
@@ -562,122 +650,196 @@ impl AppView {
             } else {
                 "选择摄像头"
             };
-            control_row = control_row.child(
-                div()
-                    .id(SharedString::from("camera-picker-toggle"))
-                    .px_3()
-                    .py_2()
-                    .rounded_sm()
-                    .bg(rgb(0x0ea5e9))
-                    .text_color(rgb(0xffffff))
-                    .cursor_pointer()
+            control_actions = control_actions.child(
+                Button::new(SharedString::from("camera-picker-toggle"))
+                    .outline()
+                    .label(picker_label)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.camera_picker_open = !this.camera_picker_open;
                         cx.notify();
-                    }))
-                    .child(picker_label),
+                    })),
             );
         }
 
         let mut picker_panel: Option<AnyElement> = None;
         if self.camera_picker_open && !self.available_cameras.is_empty() {
-            let mut list = div()
-                .w(camera_width)
-                .flex()
-                .flex_col()
+            let mut list = v_flex()
                 .gap_1()
                 .p_2()
                 .rounded_md()
-                .bg(rgb(0x0f172a))
                 .border_1()
-                .border_color(rgb(0x1f2937));
+                .border_color(theme.border)
+                .bg(theme.muted);
 
             for (idx, device) in self.available_cameras.iter().enumerate() {
                 let is_selected = self.selected_camera_idx == Some(idx);
-                let label = format!("{} {}", if is_selected { "●" } else { "○" }, device.label);
                 list = list.child(
-                    div()
-                        .id(SharedString::from(format!("camera-picker-{idx}")))
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .bg(if is_selected {
-                            rgb(0x111827)
-                        } else {
-                            rgb(0x0b1220)
-                        })
-                        .text_color(rgb(0xe5e7eb))
-                        .cursor_pointer()
+                    Button::new(SharedString::from(format!("camera-picker-{idx}")))
+                        .label(device.label.clone())
+                        .selected(is_selected)
+                        .outline()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.switch_camera(idx);
                             cx.notify();
-                        }))
-                        .child(label),
+                        })),
                 );
             }
 
             if let Some(err) = &self.camera_error {
-                list = list.child(div().text_sm().text_color(rgb(0xfca5a5)).child(err.clone()));
+                list = list.child(Tag::danger().rounded_full().child(err.clone()));
             }
 
             picker_panel = Some(list.into_any_element());
         } else if let Some(err) = &self.camera_error {
             picker_panel = Some(
-                div()
-                    .w(camera_width)
-                    .text_sm()
-                    .text_color(rgb(0xfca5a5))
+                Tag::danger()
+                    .rounded_full()
                     .child(err.clone())
                     .into_any_element(),
             );
         }
 
-        let mut camera_content = div()
-            .gap_2()
-            .flex()
-            .flex_col()
-            .items_start()
-            .child(camera_shell)
-            .child(control_row);
-
-        if let Some(picker) = picker_panel {
-            camera_content = camera_content.child(picker);
-        }
-
-        let camera_panel = div()
-            .absolute()
-            .top(px(12.0))
-            .left(px(12.0))
-            .p_2()
-            .bg(rgba(0x0b1220dd))
-            .rounded_md()
-            .shadow_lg()
-            .border_1()
-            .border_color(rgb(0x1f2937))
-            .child(camera_content);
-
-        let main_panel = div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
+        let mut camera_card = v_flex()
             .gap_3()
-            .bg(rgb(0x0f172a))
-            .text_color(rgb(0xe5e7eb))
-            .child(div().text_2xl().child(gesture_text))
+            .p_4()
+            .rounded_lg()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.group_box)
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(Tag::secondary().rounded_full().small().child("摄像头"))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child(camera_label.clone()),
+                            ),
+                    )
+                    .child(control_actions),
+            )
+            .child(camera_shell)
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x9ca3af))
+                    .text_color(theme.muted_foreground)
+                    .child(frame_status.clone()),
+            );
+
+        if let Some(picker) = picker_panel {
+            camera_card = camera_card.child(picker);
+        }
+
+        let backend_label = match self.recognizer_backend {
+            RecognizerBackend::Placeholder => "占位推理",
+            #[cfg(feature = "handpose-tract")]
+            RecognizerBackend::HandposeTract { .. } => "Tract/ONNX",
+        };
+
+        let mut hero_card = v_flex()
+            .gap_4()
+            .p_6()
+            .rounded_lg()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.group_box)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .flex_wrap()
+                    .child(Tag::primary().rounded_full().small().child("实时手势"))
+                    .child(Tag::info().rounded_full().small().child(backend_label)),
+            )
+            .child(
+                div()
+                    .text_2xl()
+                    .font_semibold()
+                    .text_color(theme.foreground)
+                    .child(gesture_text),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .flex_wrap()
+                    .child(Tag::secondary().rounded_full().child(camera_label.clone()))
+                    .child(Tag::info().rounded_full().child(resolution_label)),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
                     .child(frame_status),
             );
 
-        div()
-            .relative()
+        if let Some(result) = &self.latest_result {
+            hero_card = hero_card.child(
+                Tag::success()
+                    .rounded_full()
+                    .small()
+                    .child(format!("置信度 {:.0}%", result.confidence * 100.0)),
+            );
+        } else {
+            hero_card =
+                hero_card.child(Tag::warning().rounded_full().small().child("等待识别结果"));
+        }
+
+        let camera_ready_tag = if self.latest_frame.is_some() {
+            Tag::success().rounded_full().small().child("摄像头就绪")
+        } else {
+            Tag::warning().rounded_full().small().child("等待摄像头")
+        };
+
+        let recognizer_tag = if self.recognizer_handle.is_some() {
+            Tag::success().rounded_full().small().child("识别运行中")
+        } else {
+            Tag::secondary().rounded_full().small().child("正在初始化")
+        };
+
+        v_flex()
             .size_full()
-            .child(main_panel)
-            .child(camera_panel)
+            .bg(theme.background)
+            .p_6()
+            .gap_4()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .flex_wrap()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                Tag::primary()
+                                    .rounded_full()
+                                    .small()
+                                    .child("Gesture Universe"),
+                            )
+                            .child(div().text_xl().font_semibold().child("手势宇宙")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .flex_wrap()
+                            .child(recognizer_tag)
+                            .child(camera_ready_tag),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_4()
+                    .items_start()
+                    .flex_wrap()
+                    .child(hero_card.flex_1())
+                    .child(camera_card),
+            )
             .into_any_element()
     }
 }
@@ -709,7 +871,7 @@ impl Render for AppView {
             Screen::Download(mut state) => {
                 self.poll_download_events(&mut state);
                 let should_switch = state.finished && state.error.is_none();
-                let view = self.render_download_view(&state);
+                let view = self.render_download_view(&state, cx);
                 if should_switch {
                     self.start_recognizer_if_needed();
                     screen = Screen::Main;

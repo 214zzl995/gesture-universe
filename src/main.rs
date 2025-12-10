@@ -7,6 +7,7 @@ mod ui;
 use anyhow::Result;
 use crossbeam_channel::bounded;
 use gpui::Application;
+use gpui_component;
 use recognizer::RecognizerBackend;
 
 fn main() -> Result<()> {
@@ -18,20 +19,24 @@ fn main() -> Result<()> {
 
     let recognizer_backend = RecognizerBackend::default();
 
-    Application::new().run(move |app| {
-        if let Err(err) = ui::launch_ui(
-            app,
-            frame_to_ui_rx,
-            result_rx,
-            frame_to_rec_rx,
-            frame_to_ui_tx,
-            frame_to_rec_tx,
-            result_tx,
-            recognizer_backend.clone(),
-        ) {
-            eprintln!("failed to launch ui: {err:?}");
-        }
-    });
+    Application::new()
+        .with_assets(gpui_component_assets::Assets)
+        .run(move |app| {
+            gpui_component::init(app);
+
+            if let Err(err) = ui::launch_ui(
+                app,
+                frame_to_ui_rx,
+                result_rx,
+                frame_to_rec_rx,
+                frame_to_ui_tx,
+                frame_to_rec_tx,
+                result_tx,
+                recognizer_backend.clone(),
+            ) {
+                eprintln!("failed to launch ui: {err:?}");
+            }
+        });
 
     Ok(())
 }
