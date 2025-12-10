@@ -1,4 +1,11 @@
-use std::{thread, time::Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::Instant,
+};
 
 use anyhow::Result;
 use crossbeam_channel::Sender;
@@ -15,6 +22,30 @@ use crate::types::Frame;
 pub struct CameraDevice {
     pub index: CameraIndex,
     pub label: String,
+}
+
+#[derive(Debug)]
+pub struct CameraStream {
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl CameraStream {
+    pub fn stop(mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for CameraStream {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 pub fn available_cameras() -> Result<Vec<CameraDevice>> {
@@ -50,9 +81,12 @@ pub fn start_camera_stream(
     index: CameraIndex,
     ui_tx: Sender<Frame>,
     recog_tx: Sender<Frame>,
-) -> Result<thread::JoinHandle<()>> {
+) -> Result<CameraStream> {
     // Fail fast before spawning the capture thread.
     build_camera(index.clone())?;
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_flag = stop.clone();
 
     let handle = thread::spawn(move || {
         let mut camera = match build_camera(index) {
@@ -63,7 +97,7 @@ pub fn start_camera_stream(
             }
         };
 
-        loop {
+        while !stop_flag.load(Ordering::Relaxed) {
             let frame = match camera.frame() {
                 Ok(frame) => frame,
                 Err(err) => {
@@ -104,5 +138,8 @@ pub fn start_camera_stream(
         }
     });
 
-    Ok(handle)
+    Ok(CameraStream {
+        stop,
+        handle: Some(handle),
+    })
 }

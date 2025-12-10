@@ -9,7 +9,7 @@ use gpui::{
 use image::{Frame as ImageFrame, ImageBuffer, Rgba};
 
 use crate::{
-    camera::{self, CameraDevice},
+    camera::{self, CameraDevice, CameraStream},
     model_download::{DownloadEvent, default_model_path, ensure_model_available_with_callback},
     recognizer::{self, RecognizerBackend},
     types::{Frame, GestureResult},
@@ -78,13 +78,17 @@ struct AppView {
     result_tx: Option<Sender<GestureResult>>,
     recognizer_backend: RecognizerBackend,
     recognizer_handle: Option<thread::JoinHandle<()>>,
-    camera_handle: Option<thread::JoinHandle<()>>,
+    camera_stream: Option<CameraStream>,
+    available_cameras: Vec<CameraDevice>,
+    selected_camera_idx: Option<usize>,
+    camera_error: Option<String>,
     latest_frame: Option<Frame>,
     latest_result: Option<GestureResult>,
     latest_image: Option<Arc<RenderImage>>,
     download_rx: Receiver<DownloadMessage>,
     _download_handle: thread::JoinHandle<()>,
     camera_expanded: bool,
+    camera_picker_open: bool,
 }
 
 enum Screen {
@@ -94,7 +98,9 @@ enum Screen {
 }
 
 enum CameraState {
-    Unavailable { message: String },
+    Unavailable {
+        message: String,
+    },
     Selection {
         options: Vec<CameraDevice>,
         selected: usize,
@@ -139,11 +145,16 @@ impl AppView {
         recognizer_backend: RecognizerBackend,
     ) -> Self {
         let (download_tx, download_rx) = unbounded();
-        let download_handle =
-            spawn_model_download(recognizer_backend.clone(), download_tx);
+        let download_handle = spawn_model_download(recognizer_backend.clone(), download_tx);
+        let (initial_camera_state, available_cameras) = Self::initial_camera_state();
+        let selected_camera_idx = if available_cameras.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
 
         Self {
-            screen: Screen::Camera(Self::initial_camera_state()),
+            screen: Screen::Camera(initial_camera_state),
             frame_rx: Some(frame_rx),
             result_rx: Some(result_rx),
             frame_to_rec_rx: Some(frame_to_rec_rx),
@@ -152,31 +163,62 @@ impl AppView {
             result_tx: Some(result_tx),
             recognizer_backend,
             recognizer_handle: None,
-            camera_handle: None,
+            camera_stream: None,
+            available_cameras,
+            selected_camera_idx,
+            camera_error: None,
             latest_frame: None,
             latest_result: None,
             latest_image: None,
             download_rx,
             _download_handle: download_handle,
             camera_expanded: false,
+            camera_picker_open: false,
         }
     }
 
-    fn initial_camera_state() -> CameraState {
+    fn initial_camera_state() -> (CameraState, Vec<CameraDevice>) {
         match camera::available_cameras() {
-            Ok(cameras) if cameras.is_empty() => CameraState::Unavailable {
-                message: "没有可用摄像头".to_string(),
-            },
-            Ok(cameras) => CameraState::Selection {
-                options: cameras,
-                selected: 0,
-                start_error: None,
-            },
+            Ok(cameras) if cameras.is_empty() => (
+                CameraState::Unavailable {
+                    message: "没有可用摄像头".to_string(),
+                },
+                Vec::new(),
+            ),
+            Ok(cameras) => (
+                CameraState::Selection {
+                    options: cameras.clone(),
+                    selected: 0,
+                    start_error: None,
+                },
+                cameras,
+            ),
             Err(err) => {
                 log::error!("failed to enumerate cameras: {err:?}");
-                CameraState::Unavailable {
-                    message: format!("没有可用摄像头: {err:#}"),
-                }
+                (
+                    CameraState::Unavailable {
+                        message: format!("没有可用摄像头: {err:#}"),
+                    },
+                    Vec::new(),
+                )
+            }
+        }
+    }
+
+    fn switch_camera(&mut self, idx: usize) {
+        if idx >= self.available_cameras.len() {
+            self.camera_error = Some("无法找到所选摄像头".to_string());
+            return;
+        }
+
+        let device = self.available_cameras[idx].clone();
+        match self.start_camera_for_device(&device) {
+            Ok(()) => {
+                self.selected_camera_idx = Some(idx);
+                self.camera_error = None;
+            }
+            Err(err) => {
+                self.camera_error = Some(format!("无法启动摄像头: {err}"));
             }
         }
     }
@@ -224,8 +266,8 @@ impl AppView {
                 selected,
                 start_error,
             } => {
-                if options.len() == 1 && self.camera_handle.is_none() && start_error.is_none() {
-                    match self.start_camera_thread(&options[0]) {
+                if options.len() == 1 && self.camera_stream.is_none() && start_error.is_none() {
+                    match self.start_camera_for_device(&options[0]) {
                         Ok(()) => {
                             *state = CameraState::Ready;
                             return div()
@@ -247,10 +289,7 @@ impl AppView {
                     let label = device.label.clone();
                     let option = div()
                         .id(SharedString::from(format!("camera-option-{idx}")))
-                        .child(format!(
-                            "{} {label}",
-                            if is_selected { "●" } else { "○" }
-                        ))
+                        .child(format!("{} {label}", if is_selected { "●" } else { "○" }))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.select_camera(idx);
                             cx.notify();
@@ -290,48 +329,66 @@ impl AppView {
             if selected < options.len() {
                 *current = selected;
                 *start_error = None;
+                self.selected_camera_idx = Some(selected);
+                self.available_cameras = options.clone();
             }
         }
     }
 
-    fn start_camera_thread(&mut self, device: &CameraDevice) -> Result<(), String> {
-        if self.camera_handle.is_some() {
-            return Ok(());
+    fn stop_camera_stream(&mut self) {
+        if let Some(stream) = self.camera_stream.take() {
+            stream.stop();
         }
+    }
+
+    fn start_camera_for_device(&mut self, device: &CameraDevice) -> Result<(), String> {
+        self.stop_camera_stream();
 
         camera::start_camera_stream(
             device.index.clone(),
             self.frame_tx.clone(),
             self.frame_to_rec_tx.clone(),
         )
-        .map(|handle| {
-            self.camera_handle = Some(handle);
+        .map(|stream| {
+            self.camera_stream = Some(stream);
+            self.latest_frame = None;
+            self.latest_result = None;
+            self.latest_image = None;
+            self.camera_error = None;
         })
         .map_err(|err| format!("{err:#}"))
     }
 
     fn start_selected_camera(&mut self) {
         let selected_device = match &self.screen {
-            Screen::Camera(CameraState::Selection { options, selected, .. }) => {
-                options.get(*selected).cloned()
+            Screen::Camera(CameraState::Selection {
+                options, selected, ..
+            }) => {
+                self.available_cameras = options.clone();
+                options
+                    .get(*selected)
+                    .cloned()
+                    .map(|device| (*selected, device))
             }
             _ => None,
         };
 
-        let Some(device) = selected_device else {
+        let Some((selected_idx, device)) = selected_device else {
             if let Screen::Camera(CameraState::Selection { start_error, .. }) = &mut self.screen {
                 *start_error = Some("无法找到所选摄像头".to_string());
             }
             return;
         };
 
-        match self.start_camera_thread(&device) {
+        match self.start_camera_for_device(&device) {
             Ok(()) => {
+                self.selected_camera_idx = Some(selected_idx);
+                self.camera_error = None;
+                self.camera_picker_open = false;
                 self.screen = Screen::Download(DownloadState::new());
             }
             Err(err) => {
-                if let Screen::Camera(CameraState::Selection { start_error, .. }) =
-                    &mut self.screen
+                if let Screen::Camera(CameraState::Selection { start_error, .. }) = &mut self.screen
                 {
                     *start_error = Some(format!("无法启动摄像头: {err}"));
                 }
@@ -363,8 +420,7 @@ impl AppView {
         let detail = match (state.total, state.finished) {
             (_, true) => "Done".to_string(),
             (Some(total), false) if total > 0 => {
-                let percent =
-                    (state.downloaded as f64 / total as f64 * 100.0).clamp(0.0, 100.0);
+                let percent = (state.downloaded as f64 / total as f64 * 100.0).clamp(0.0, 100.0);
                 format!("{percent:.1}%")
             }
             _ => format!("Downloaded {} KB", state.downloaded / 1024),
@@ -404,11 +460,23 @@ impl AppView {
             }
         }
 
+        let camera_label = self
+            .selected_camera_idx
+            .and_then(|idx| self.available_cameras.get(idx))
+            .map(|c| c.label.clone())
+            .unwrap_or_else(|| {
+                if self.available_cameras.is_empty() {
+                    "未检测到摄像头".to_string()
+                } else {
+                    "未选择摄像头".to_string()
+                }
+            });
+
         let frame_status = self
             .latest_frame
             .as_ref()
-            .map(|f| format!("摄像头: {}x{} (最新)", f.width, f.height))
-            .unwrap_or_else(|| "摄像头: 等待画面...".to_string());
+            .map(|f| format!("摄像头: {camera_label} {}x{} (最新)", f.width, f.height))
+            .unwrap_or_else(|| format!("摄像头: {camera_label}，等待画面..."));
 
         let gesture_text = self
             .latest_result
@@ -416,8 +484,16 @@ impl AppView {
             .map(|g| format!("手势: {}", g.display_text()))
             .unwrap_or_else(|| "手势: ...".to_string());
 
-        let camera_width = if self.camera_expanded { px(520.0) } else { px(240.0) };
-        let camera_height = if self.camera_expanded { px(390.0) } else { px(180.0) };
+        let camera_width = if self.camera_expanded {
+            px(520.0)
+        } else {
+            px(240.0)
+        };
+        let camera_height = if self.camera_expanded {
+            px(390.0)
+        } else {
+            px(180.0)
+        };
 
         let frame_view: AnyElement = if let Some(image) = &self.latest_image {
             img(image.clone())
@@ -452,50 +528,133 @@ impl AppView {
             "放大画面"
         };
 
+        let mut control_row = div()
+            .w(camera_width)
+            .flex()
+            .justify_between()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0xe5e7eb))
+                    .child(frame_status.clone()),
+            )
+            .child(
+                div()
+                    .id(SharedString::from("camera-size-toggle"))
+                    .px_3()
+                    .py_2()
+                    .rounded_sm()
+                    .bg(rgb(0x2563eb))
+                    .text_color(rgb(0xffffff))
+                    .cursor_pointer()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.camera_expanded = !this.camera_expanded;
+                        cx.notify();
+                    }))
+                    .child(toggle_label),
+            );
+
+        if self.available_cameras.len() > 1 {
+            let picker_label = if self.camera_picker_open {
+                "关闭摄像头选择"
+            } else {
+                "选择摄像头"
+            };
+            control_row = control_row.child(
+                div()
+                    .id(SharedString::from("camera-picker-toggle"))
+                    .px_3()
+                    .py_2()
+                    .rounded_sm()
+                    .bg(rgb(0x0ea5e9))
+                    .text_color(rgb(0xffffff))
+                    .cursor_pointer()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.camera_picker_open = !this.camera_picker_open;
+                        cx.notify();
+                    }))
+                    .child(picker_label),
+            );
+        }
+
+        let mut picker_panel: Option<AnyElement> = None;
+        if self.camera_picker_open && !self.available_cameras.is_empty() {
+            let mut list = div()
+                .w(camera_width)
+                .flex()
+                .flex_col()
+                .gap_1()
+                .p_2()
+                .rounded_md()
+                .bg(rgb(0x0f172a))
+                .border_1()
+                .border_color(rgb(0x1f2937));
+
+            for (idx, device) in self.available_cameras.iter().enumerate() {
+                let is_selected = self.selected_camera_idx == Some(idx);
+                let label = format!("{} {}", if is_selected { "●" } else { "○" }, device.label);
+                list = list.child(
+                    div()
+                        .id(SharedString::from(format!("camera-picker-{idx}")))
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .bg(if is_selected {
+                            rgb(0x111827)
+                        } else {
+                            rgb(0x0b1220)
+                        })
+                        .text_color(rgb(0xe5e7eb))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.switch_camera(idx);
+                            cx.notify();
+                        }))
+                        .child(label),
+                );
+            }
+
+            if let Some(err) = &self.camera_error {
+                list = list.child(div().text_sm().text_color(rgb(0xfca5a5)).child(err.clone()));
+            }
+
+            picker_panel = Some(list.into_any_element());
+        } else if let Some(err) = &self.camera_error {
+            picker_panel = Some(
+                div()
+                    .w(camera_width)
+                    .text_sm()
+                    .text_color(rgb(0xfca5a5))
+                    .child(err.clone())
+                    .into_any_element(),
+            );
+        }
+
+        let mut camera_content = div()
+            .gap_2()
+            .flex()
+            .flex_col()
+            .items_start()
+            .child(camera_shell)
+            .child(control_row);
+
+        if let Some(picker) = picker_panel {
+            camera_content = camera_content.child(picker);
+        }
+
         let camera_panel = div()
             .absolute()
             .top(px(12.0))
             .left(px(12.0))
             .p_2()
-            .gap_2()
-            .flex()
-            .flex_col()
-            .items_start()
             .bg(rgba(0x0b1220dd))
             .rounded_md()
             .shadow_lg()
             .border_1()
             .border_color(rgb(0x1f2937))
-            .child(camera_shell)
-            .child(
-                div()
-                    .w(camera_width)
-                    .flex()
-                    .justify_between()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(rgb(0xe5e7eb))
-                            .child(frame_status.clone()),
-                    )
-                    .child(
-                        div()
-                            .id(SharedString::from("camera-size-toggle"))
-                            .px_3()
-                            .py_2()
-                            .rounded_sm()
-                            .bg(rgb(0x2563eb))
-                            .text_color(rgb(0xffffff))
-                            .cursor_pointer()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.camera_expanded = !this.camera_expanded;
-                                cx.notify();
-                            }))
-                            .child(toggle_label),
-                    ),
-            );
+            .child(camera_content);
 
         let main_panel = div()
             .size_full()
@@ -507,13 +666,18 @@ impl AppView {
             .bg(rgb(0x0f172a))
             .text_color(rgb(0xe5e7eb))
             .child(div().text_2xl().child(gesture_text))
-            .child(div().text_sm().text_color(rgb(0x9ca3af)).child(frame_status));
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x9ca3af))
+                    .child(frame_status),
+            );
 
         div()
             .relative()
             .size_full()
-            .child(camera_panel)
             .child(main_panel)
+            .child(camera_panel)
             .into_any_element()
     }
 }

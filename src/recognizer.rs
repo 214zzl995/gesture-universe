@@ -12,9 +12,9 @@ use {
     tract_onnx::prelude::*,
 };
 
-use crate::types::{Frame, GestureResult};
 #[cfg(feature = "handpose-tract")]
 use crate::model_download::{default_model_path, ensure_model_available};
+use crate::types::{Frame, GestureResult};
 
 #[cfg(feature = "handpose-tract")]
 const INPUT_SIZE: u32 = 224;
