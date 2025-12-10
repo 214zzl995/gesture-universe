@@ -2,9 +2,11 @@ use std::{mem, sync::Arc, thread};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    AnyElement, App, AppContext, Context, IntoElement, ObjectFit, ParentElement, Render,
-    RenderImage, SharedString, Styled, StyledImage, Window, WindowOptions, div, img, px,
+    AnyElement, App, AppContext, Context, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, Render, RenderImage,
+    SharedString, Styled, StyledImage, Window, WindowOptions, div, img, px,
 };
+use gpui::prelude::FluentBuilder;
 use gpui_component::{
     ActiveTheme, Root, Selectable, Sizable, StyledExt,
     button::{Button, ButtonVariants},
@@ -52,6 +54,9 @@ const SKELETON_LINE_THICKNESS: i32 = 3;
 const CAMERA_MIN_SIZE: (f32, f32) = (240.0, 180.0);
 const CAMERA_MAX_SIZE: (f32, f32) = (720.0, 540.0);
 const DEFAULT_CAMERA_RATIO: f32 = 4.0 / 3.0;
+const RIGHT_PANEL_MIN_WIDTH: f32 = 320.0;
+const RIGHT_PANEL_MAX_WIDTH: f32 = 720.0;
+const RIGHT_PANEL_INITIAL_WIDTH: f32 = 480.0;
 
 pub fn launch_ui(
     app: &mut App,
@@ -101,6 +106,8 @@ struct AppView {
     download_rx: Receiver<DownloadMessage>,
     _download_handle: thread::JoinHandle<()>,
     camera_picker_open: bool,
+    right_panel_width: f32,
+    panel_resize_state: Option<PanelResizeState>,
 }
 
 enum Screen {
@@ -146,6 +153,11 @@ enum DownloadMessage {
     Error(String),
 }
 
+struct PanelResizeState {
+    start_pointer_x: f32,
+    start_width: f32,
+}
+
 impl AppView {
     fn new(
         frame_rx: Receiver<Frame>,
@@ -185,6 +197,8 @@ impl AppView {
             download_rx,
             _download_handle: download_handle,
             camera_picker_open: false,
+            right_panel_width: RIGHT_PANEL_INITIAL_WIDTH,
+            panel_resize_state: None,
         }
     }
 
@@ -483,6 +497,54 @@ impl AppView {
         DEFAULT_CAMERA_RATIO
     }
 
+    fn start_panel_resize(
+        &mut self,
+        event: &MouseDownEvent,
+        _: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.panel_resize_state = Some(PanelResizeState {
+            start_pointer_x: f32::from(event.position.x),
+            start_width: self.right_panel_width,
+        });
+        cx.notify();
+    }
+
+    fn update_panel_resize(
+        &mut self,
+        event: &MouseMoveEvent,
+        _: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(state) = &self.panel_resize_state {
+            if !event.dragging() {
+                self.panel_resize_state = None;
+                cx.notify();
+                return;
+            }
+
+            let delta_x = f32::from(event.position.x) - state.start_pointer_x;
+            let target_width = state.start_width - delta_x;
+            let new_width = target_width
+                .clamp(RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH);
+            if (new_width - self.right_panel_width).abs() > f32::EPSILON {
+                self.right_panel_width = new_width;
+                cx.notify();
+            }
+        }
+    }
+
+    fn finish_panel_resize(
+        &mut self,
+        _: &MouseUpEvent,
+        _: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.panel_resize_state.take().is_some() {
+            cx.notify();
+        }
+    }
+
     fn render_download_view(
         &self,
         state: &DownloadState,
@@ -620,11 +682,12 @@ impl AppView {
             .unwrap_or_else(|| "--".to_string());
 
         let ratio = self.camera_aspect_ratio();
-        let preferred_height = {
-            let max_from_width = CAMERA_MAX_SIZE.0 / ratio;
-            let clamped = max_from_width.min(CAMERA_MAX_SIZE.1);
-            clamped.max(CAMERA_MIN_SIZE.1)
-        };
+        let panel_width = self
+            .right_panel_width
+            .clamp(RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH);
+        self.right_panel_width = panel_width;
+        let camera_height = (panel_width / ratio)
+            .clamp(CAMERA_MIN_SIZE.1, CAMERA_MAX_SIZE.1);
 
         let frame_view: AnyElement = if let Some(image) = &self.latest_image {
             img(image.clone())
@@ -646,7 +709,7 @@ impl AppView {
         let camera_shell = div()
             .relative()
             .w_full()
-            .h(px(preferred_height))
+            .h(px(camera_height))
             .rounded_lg()
             .border_1()
             .border_color(theme.border)
@@ -753,11 +816,46 @@ impl AppView {
             Tag::secondary().rounded_full().small().child("正在初始化")
         };
 
+        let placeholder_block = div()
+            .w_full()
+            .h(px(160.0))
+            .rounded_lg()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.group_box);
+
+        let panel_handle = div()
+            .absolute()
+            .left(px(-6.0))
+            .top(px(0.0))
+            .bottom(px(0.0))
+            .w(px(12.0))
+            .cursor_ew_resize()
+            .bg(theme.border)
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::start_panel_resize))
+            .on_mouse_move(cx.listener(Self::update_panel_resize))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::finish_panel_resize))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::finish_panel_resize));
+
+        let right_panel = div()
+            .relative()
+            .w(px(panel_width))
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(camera_card)
+                    .child(placeholder_block),
+            )
+            .child(panel_handle);
+
         v_flex()
             .size_full()
             .bg(theme.background)
             .p_6()
             .gap_4()
+            .when(self.panel_resize_state.is_some(), |this| this.cursor_ew_resize())
+            .on_mouse_move(cx.listener(Self::update_panel_resize))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::finish_panel_resize))
             .child(
                 h_flex()
                     .justify_end()
@@ -772,7 +870,11 @@ impl AppView {
                     ),
             )
             .child(
-                camera_card,
+                h_flex()
+                    .gap_3()
+                    .items_start()
+                    .child(div().flex_1())
+                    .child(right_panel),
             )
             .into_any_element()
     }
