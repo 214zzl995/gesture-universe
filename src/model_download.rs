@@ -19,8 +19,14 @@ pub fn default_model_path() -> PathBuf {
 #[derive(Clone, Debug)]
 pub enum DownloadEvent {
     AlreadyPresent,
-    Started { total: Option<u64> },
-    Progress { downloaded: u64, total: Option<u64> },
+    Started {
+        total: Option<u64>,
+    },
+    Progress {
+        downloaded: u64,
+        #[allow(dead_code)]
+        total: Option<u64>,
+    },
     Finished,
 }
 
@@ -58,19 +64,14 @@ where
     }
 
     if let Some(parent) = model_path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!("failed to create model directory {}", parent.display())
-        })?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create model directory {}", parent.display()))?;
     }
 
     download_to_path(MODEL_URL, model_path, &mut on_event)
 }
 
-fn download_to_path<F>(
-    url: &str,
-    dest: &Path,
-    on_event: &mut F,
-) -> anyhow::Result<()>
+fn download_to_path<F>(url: &str, dest: &Path, on_event: &mut F) -> anyhow::Result<()>
 where
     F: FnMut(DownloadEvent),
 {
@@ -141,9 +142,8 @@ fn create_progress_bar(total_size: Option<u64>) -> ProgressBar {
         }
         _ => {
             let pb = ProgressBar::new_spinner();
-            let style =
-                ProgressStyle::with_template("{spinner:.green} downloading handpose model")
-                    .unwrap();
+            let style = ProgressStyle::with_template("{spinner:.green} downloading handpose model")
+                .unwrap();
             pb.set_style(style);
             pb.enable_steady_tick(Duration::from_millis(100));
             pb
