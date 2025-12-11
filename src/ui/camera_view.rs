@@ -425,6 +425,7 @@ impl AppView {
             Ok(()) => {
                 self.selected_camera_idx = Some(idx);
                 self.camera_error = None;
+                self.camera_picker_open = false;
             }
             Err(err) => {
                 self.camera_error = Some(format!("无法启动摄像头: {err}"));
