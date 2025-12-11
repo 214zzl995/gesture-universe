@@ -11,7 +11,7 @@ Gesture Universe is a high-performance, real-time hand gesture recognition appli
   - 👍 Thumbs Up
   - ☝️ Pointing
   - 🤟 I Love You
-  - 🫶 Finger Heart
+  - 🫰 Finger Heart
   - ✊ Fist
   - 👋 Open Hand
 - **Modern UI**: Built with GPUI for a native, high-performance user interface on macOS.
