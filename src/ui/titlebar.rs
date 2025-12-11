@@ -18,7 +18,7 @@ impl AppView {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
-        let titlebar_height = px(32.0);
+        let titlebar_height = px(37.0);
         let titlebar_bg = gpui::rgb(0x1a2332);
 
         #[cfg(target_os = "windows")]

@@ -6,7 +6,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
-use gpui::prelude::FluentBuilder;
+use gpui::{ prelude::FluentBuilder};
 use gpui::{
     AnyElement, App, AppContext, Context, Hsla, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, Render, RenderImage,
@@ -76,9 +76,12 @@ pub fn launch_ui(
 ) -> gpui::Result<()> {
     let window_options = WindowOptions {
         titlebar: Some(TitlebarOptions {
-            title: Some("Gesture Universe".into()),
+            title: None,
             appears_transparent: true,
-            traffic_light_position: None,
+            traffic_light_position: Some(gpui::Point {
+                x: px(12.0),
+                y: px(12.0),
+            })
         }),
         window_decorations: Some(WindowDecorations::Client),
         window_min_size: Some(gpui::Size {
