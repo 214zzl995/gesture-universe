@@ -5,6 +5,8 @@ use super::{
     ObjectFit, PanelResizeState, ParentElement, RIGHT_PANEL_MAX_WIDTH, RIGHT_PANEL_MIN_WIDTH,
     SharedString, Styled, StyledImage, Window, h_flex, v_flex,
 };
+use crate::types::{FingerState, GestureMotion};
+use gpui_component::StyledExt;
 use std::sync::Arc;
 
 impl AppView {
@@ -204,21 +206,7 @@ impl AppView {
                 ("○", "正在初始化", theme.muted_foreground)
             };
 
-        let placeholder_block = super::div()
-            .w(super::px(panel_width))
-            .flex_1()
-            .min_h(super::px(40.0))
-            .rounded_lg()
-            .bg(gpui::rgb(0x0f1419))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                super::div()
-                    .text_xs()
-                    .text_color(gpui::rgb(0x4a5568))
-                    .child("预留区域"),
-            );
+        let gesture_panel = self.render_gesture_panel(panel_width, cx);
 
         let panel_handle = super::div()
             .absolute()
@@ -238,7 +226,7 @@ impl AppView {
             .w(super::px(panel_width))
             .h_full()
             .overflow_hidden()
-            .child(v_flex().gap_3().child(camera_card).child(placeholder_block))
+            .child(v_flex().gap_3().child(camera_card).child(gesture_panel))
             .child(panel_handle);
 
         let titlebar = self.render_titlebar(
@@ -271,6 +259,184 @@ impl AppView {
                     .child(right_panel),
             )
             .into_any_element()
+    }
+
+    fn render_gesture_panel(&self, panel_width: f32, cx: &mut Context<'_, Self>) -> AnyElement {
+        let theme = cx.theme();
+        let finger_labels = ["拇指", "食指", "中指", "无名指", "小指"];
+
+        let (
+            primary_text,
+            secondary_text,
+            confidence_text,
+            handedness_text,
+            motion_state,
+            finger_states,
+        ) = match &self.latest_result {
+            Some(result) => {
+                let detail = result.detail.as_ref();
+                let primary = detail
+                    .map(|d| format!("{}{}", d.primary.emoji(), d.primary.display_name()))
+                    .unwrap_or_else(|| result.label.clone());
+                let secondary = detail.and_then(|d| {
+                    d.secondary
+                        .map(|s| format!("也可能是 {}{}", s.emoji(), s.display_name()))
+                });
+                let motion = detail.map(|d| d.motion).unwrap_or(GestureMotion::Steady);
+                let handedness = detail
+                    .map(|d| d.handedness.label().to_string())
+                    .unwrap_or_else(|| "--".to_string());
+                let states = detail.map(|d| d.finger_states);
+                let conf = format!("{:.0}%", (result.confidence * 100.0).clamp(0.0, 100.0));
+                (primary, secondary, conf, handedness, motion, states)
+            }
+            None => (
+                "等待手部进入画面".to_string(),
+                None,
+                "--".to_string(),
+                "--".to_string(),
+                GestureMotion::Steady,
+                None,
+            ),
+        };
+
+        let status_color = if finger_states.is_some() {
+            theme.success
+        } else {
+            theme.muted_foreground
+        };
+
+        let motion_chip = match motion_state {
+            GestureMotion::Fanning => self.stat_chip("状态", "扇风/摇动", gpui::rgb(0x22c55e)),
+            GestureMotion::VerticalWave => self.stat_chip("状态", "上下挥动", gpui::rgb(0xf97316)),
+            GestureMotion::Moving => self.stat_chip("状态", "移动中", gpui::rgb(0xfbbf24)),
+            GestureMotion::Steady => self.stat_chip("状态", "保持", theme.muted_foreground),
+        };
+
+        let finger_block: AnyElement = if let Some(states) = finger_states {
+            let mut first_row = h_flex().gap_2();
+            let mut second_row = h_flex().gap_2();
+            for (idx, name) in finger_labels.iter().enumerate() {
+                let chip = self.finger_chip(name, states[idx]);
+                if idx < 3 {
+                    first_row = first_row.child(chip);
+                } else {
+                    second_row = second_row.child(chip);
+                }
+            }
+            v_flex()
+                .gap_1()
+                .child(first_row)
+                .child(second_row)
+                .into_any_element()
+        } else {
+            super::div()
+                .text_xs()
+                .text_color(gpui::rgb(0x6b7280))
+                .child("等检测到手势后，这里会展示各手指的状态与动作")
+                .into_any_element()
+        };
+
+        let mut container = v_flex()
+            .w(super::px(panel_width))
+            .gap_3()
+            .p_4()
+            .rounded_lg()
+            .bg(gpui::rgb(0x0f172a))
+            .border_1()
+            .border_color(gpui::rgba(0xffffff1a))
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                super::div()
+                                    .w(super::px(8.0))
+                                    .h(super::px(8.0))
+                                    .rounded_full()
+                                    .bg(status_color),
+                            )
+                            .child(
+                                super::div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .text_color(gpui::rgb(0xffffff))
+                                    .child("当前手势"),
+                            ),
+                    )
+                    .child(
+                        super::div()
+                            .text_xs()
+                            .text_color(gpui::rgb(0x94a3b8))
+                            .child("实时更新"),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        super::div()
+                            .text_3xl()
+                            .font_bold()
+                            .text_color(gpui::rgb(0xe0f2fe))
+                            .child(primary_text.clone()),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                super::div()
+                                    .text_sm()
+                                    .text_color(gpui::rgb(0xa5b4fc))
+                                    .child("检测结果"),
+                            )
+                            .when(secondary_text.is_some(), |this| {
+                                this.child(
+                                    super::div()
+                                        .text_xs()
+                                        .text_color(gpui::rgb(0x94a3b8))
+                                        .child(secondary_text.clone().unwrap_or_default()),
+                                )
+                            }),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(self.stat_chip("置信度", &confidence_text, theme.success))
+                    .child(self.stat_chip("惯用手", &handedness_text, gpui::rgb(0x38bdf8)))
+                    .child(motion_chip),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        super::div()
+                            .text_xs()
+                            .text_color(gpui::rgb(0x94a3b8))
+                            .child("手指展开度"),
+                    )
+                    .child(finger_block),
+            );
+
+        if finger_states.is_none() {
+            container = container.child(
+                super::div()
+                    .pt_1()
+                    .text_xs()
+                    .text_color(gpui::rgb(0x6b7280))
+                    .child("让手掌进入画面，并尝试不同手势（握拳、比V、OK、I Love You 等）"),
+            );
+        }
+
+        container.into_any_element()
     }
 
     fn camera_aspect_ratio(&self) -> f32 {
@@ -340,5 +506,61 @@ impl AppView {
             // every frame and memory will climb rapidly while the camera is running.
             cx.drop_image(old_image, Some(window));
         }
+    }
+
+    fn stat_chip<C>(&self, label: &str, value: &str, color: C) -> AnyElement
+    where
+        C: Into<gpui::Rgba>,
+    {
+        let color = color.into();
+        super::div()
+            .px(super::px(10.0))
+            .py(super::px(6.0))
+            .rounded_md()
+            .bg(gpui::rgba(0xffffff14))
+            .border_1()
+            .border_color(gpui::rgba(0xffffff12))
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        super::div()
+                            .text_xs()
+                            .text_color(gpui::rgb(0x9ca3af))
+                            .child(label.to_string()),
+                    )
+                    .child(
+                        super::div()
+                            .text_sm()
+                            .font_semibold()
+                            .text_color(color)
+                            .child(value.to_string()),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn finger_chip(&self, label: &str, state: FingerState) -> AnyElement {
+        let (bg, fg) = match state {
+            FingerState::Extended => (gpui::rgba(0x15803d40), gpui::rgb(0x34d399)),
+            FingerState::HalfBent => (gpui::rgba(0x1d4ed840), gpui::rgb(0x93c5fd)),
+            FingerState::Folded => (gpui::rgba(0x7f1d1d40), gpui::rgb(0xfca5a5)),
+        };
+
+        super::div()
+            .px(super::px(10.0))
+            .py(super::px(6.0))
+            .rounded_md()
+            .bg(bg)
+            .border_1()
+            .border_color(gpui::rgba(0xffffff12))
+            .child(
+                super::div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(fg)
+                    .child(format!("{label}: {}", state.label())),
+            )
+            .into_any_element()
     }
 }

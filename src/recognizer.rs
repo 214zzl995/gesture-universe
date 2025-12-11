@@ -1,4 +1,4 @@
-use std::{thread, time::Instant};
+use std::thread;
 
 #[cfg(feature = "handpose-tract")]
 use std::path::PathBuf;
@@ -14,7 +14,10 @@ use {
 
 #[cfg(feature = "handpose-tract")]
 use crate::model_download::{default_model_path, ensure_model_available};
-use crate::types::{Frame, GestureResult};
+use crate::{
+    gesture::GestureClassifier,
+    types::{Frame, GestureResult},
+};
 
 #[cfg(feature = "handpose-tract")]
 const INPUT_SIZE: u32 = 224;
@@ -86,11 +89,11 @@ fn start_tract_worker(
             return;
         }
 
-        let model = match HandposeModel::new(&model_path) {
+        let mut worker = match HandposeWorker::new(&model_path) {
             Ok(model) => {
                 log::info!(
                     "handpose tract backend ready ({} nodes) using {}",
-                    model.node_count,
+                    model.model.node_count,
                     model_path.display()
                 );
                 model
@@ -102,7 +105,7 @@ fn start_tract_worker(
         };
 
         while let Some(frame) = recv_latest_frame(&frame_rx) {
-            match model.infer(&frame) {
+            match worker.process_frame(&frame) {
                 Ok(gesture) => {
                     let _ = result_tx.try_send(gesture);
                 }
@@ -147,20 +150,21 @@ fn classify_brightness(frame: &Frame) -> GestureResult {
     GestureResult {
         label: label.to_string(),
         confidence,
-        timestamp: Instant::now(),
+        timestamp: frame.timestamp,
         landmarks: None,
+        detail: None,
     }
 }
 
 #[cfg(feature = "handpose-tract")]
-struct HandposeModel {
+pub struct HandposeModel {
     model: TypedRunnableModel<TypedModel>,
     node_count: usize,
 }
 
 #[cfg(feature = "handpose-tract")]
 impl HandposeModel {
-    fn new(model_path: &PathBuf) -> TractResult<Self> {
+    pub fn new(model_path: &PathBuf) -> TractResult<Self> {
         let mut model = tract_onnx::onnx().model_for_path(model_path)?;
         model.set_input_fact(
             0,
@@ -181,7 +185,7 @@ impl HandposeModel {
         Ok(Self { model, node_count })
     }
 
-    fn infer(&self, frame: &Frame) -> TractResult<GestureResult> {
+    pub fn infer_landmarks(&self, frame: &Frame) -> TractResult<HandposeOutput> {
         let (input, letterbox) = prepare_frame(frame)?;
         let outputs = self
             .model
@@ -190,19 +194,75 @@ impl HandposeModel {
         let (landmarks, confidence, handedness) = decode_outputs(&outputs)?;
         let projected = project_landmarks(&landmarks, &letterbox);
 
-        let has_detection = confidence >= 0.2;
-        let label = if has_detection {
-            let hand = if handedness >= 0.5 { "Right" } else { "Left" };
-            format!("{hand} hand")
+        Ok(HandposeOutput {
+            raw_landmarks: landmarks,
+            projected_landmarks: projected,
+            confidence: confidence.clamp(0.0, 1.0),
+            handedness,
+        })
+    }
+}
+
+#[cfg(feature = "handpose-tract")]
+pub struct HandposeOutput {
+    pub raw_landmarks: Vec<[f32; 3]>,
+    pub projected_landmarks: Vec<(f32, f32)>,
+    pub confidence: f32,
+    pub handedness: f32,
+}
+
+#[cfg(feature = "handpose-tract")]
+struct HandposeWorker {
+    model: HandposeModel,
+    classifier: GestureClassifier,
+}
+
+#[cfg(feature = "handpose-tract")]
+impl HandposeWorker {
+    fn new(model_path: &PathBuf) -> TractResult<Self> {
+        let model = HandposeModel::new(model_path)?;
+        Ok(Self {
+            model,
+            classifier: GestureClassifier::new(),
+        })
+    }
+
+    fn process_frame(&mut self, frame: &Frame) -> TractResult<GestureResult> {
+        let output = self.model.infer_landmarks(frame)?;
+        let has_detection = output.confidence >= 0.2;
+        let detail = if has_detection {
+            self.classifier.classify(
+                &output.raw_landmarks,
+                &output.projected_landmarks,
+                output.confidence,
+                output.handedness,
+                frame.timestamp,
+            )
         } else {
-            "No hand detected".to_string()
+            None
         };
+
+        let label = detail
+            .as_ref()
+            .map(|d| format!("{}{}", d.primary.emoji(), d.primary.display_name()))
+            .unwrap_or_else(|| {
+                if has_detection {
+                    "检测到手".to_string()
+                } else {
+                    "未检测到手".to_string()
+                }
+            });
 
         Ok(GestureResult {
             label,
-            confidence: confidence.clamp(0.0, 1.0),
-            timestamp: Instant::now(),
-            landmarks: if has_detection { Some(projected) } else { None },
+            confidence: output.confidence,
+            timestamp: frame.timestamp,
+            landmarks: if has_detection {
+                Some(output.projected_landmarks)
+            } else {
+                None
+            },
+            detail,
         })
     }
 }

@@ -6,7 +6,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
-use gpui::{ prelude::FluentBuilder};
+use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Context, Hsla, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, Render, RenderImage,
@@ -81,7 +81,7 @@ pub fn launch_ui(
             traffic_light_position: Some(gpui::Point {
                 x: px(12.0),
                 y: px(12.0),
-            })
+            }),
         }),
         window_decorations: Some(WindowDecorations::Client),
         window_min_size: Some(gpui::Size {
