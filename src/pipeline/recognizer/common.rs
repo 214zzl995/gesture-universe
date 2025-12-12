@@ -1,6 +1,7 @@
-use anyhow::{Result, anyhow};
-use image::{RgbaImage, imageops::FilterType};
+use fast_image_resize as fir;
+use anyhow::{Context, Result, anyhow};
 use ndarray::Array4;
+use rayon::prelude::*;
 
 use crate::types::Frame;
 
@@ -25,44 +26,71 @@ pub struct LetterboxInfo {
 }
 
 pub fn prepare_frame(frame: &Frame) -> Result<(Array4<f32>, LetterboxInfo)> {
-    let Some(img) = RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone()) else {
-        return Err(anyhow!("failed to build RGBA image from frame"));
-    };
+    let expected_len = (frame.width as usize)
+        .saturating_mul(frame.height as usize)
+        .saturating_mul(4);
+    if frame.rgba.len() != expected_len {
+        return Err(anyhow!(
+            "frame buffer size mismatch: got {}, expected {}",
+            frame.rgba.len(),
+            expected_len
+        ));
+    }
 
     let scale = INPUT_SIZE as f32 / (frame.width.max(frame.height) as f32);
     let new_w = (frame.width as f32 * scale).round().max(1.0) as u32;
     let new_h = (frame.height as f32 * scale).round().max(1.0) as u32;
-    let resized = image::imageops::resize(&img, new_w, new_h, FilterType::CatmullRom);
+    let src_image = fir::images::Image::from_vec_u8(
+        frame.width,
+        frame.height,
+        frame.rgba.clone(),
+        fir::PixelType::U8x4,
+    )?;
+    let mut dst_image = fir::images::Image::new(new_w, new_h, fir::PixelType::U8x4);
+    let mut resizer = fir::Resizer::new();
+    let resize_options = fir::ResizeOptions::new()
+        .resize_alg(fir::ResizeAlg::Interpolation(fir::FilterType::Bilinear));
+    resizer
+        .resize(&src_image, &mut dst_image, Some(&resize_options))
+        .context("fast resize failed")?;
+    let resized = dst_image.into_vec();
 
-    let pad_x = ((INPUT_SIZE as i64 - new_w as i64) / 2).max(0) as f32;
-    let pad_y = ((INPUT_SIZE as i64 - new_h as i64) / 2).max(0) as f32;
-    let mut canvas =
-        RgbaImage::from_pixel(INPUT_SIZE, INPUT_SIZE, image::Rgba([0u8, 0u8, 0u8, 255u8]));
-    for y in 0..new_h {
-        for x in 0..new_w {
-            let px = *resized.get_pixel(x, y);
-            let lx = (x as f32 + pad_x).round() as u32;
-            let ly = (y as f32 + pad_y).round() as u32;
-            if lx < canvas.width() && ly < canvas.height() {
-                canvas.put_pixel(lx, ly, px);
-            }
-        }
+    let pad_x = ((INPUT_SIZE as i64 - new_w as i64) / 2).max(0) as usize;
+    let pad_y = ((INPUT_SIZE as i64 - new_h as i64) / 2).max(0) as usize;
+    let mut canvas = vec![0u8; (INPUT_SIZE as usize) * (INPUT_SIZE as usize) * 4];
+    for px in canvas.chunks_mut(4) {
+        px[3] = 255;
+    }
+    let dst_stride = INPUT_SIZE as usize * 4;
+    let src_stride = new_w as usize * 4;
+    for row in 0..(new_h as usize) {
+        let dst_offset = (pad_y + row) * dst_stride + pad_x * 4;
+        let src_offset = row * src_stride;
+        let dst_slice = &mut canvas[dst_offset..dst_offset + src_stride];
+        let src_slice = &resized[src_offset..src_offset + src_stride];
+        dst_slice.copy_from_slice(src_slice);
     }
 
-    let mut input = Array4::<f32>::zeros((1, INPUT_SIZE as usize, INPUT_SIZE as usize, 3));
-    for y in 0..INPUT_SIZE {
-        for x in 0..INPUT_SIZE {
-            let pixel = canvas.get_pixel(x, y).0;
-            input[[0, y as usize, x as usize, 0]] = pixel[0] as f32 / 255.0;
-            input[[0, y as usize, x as usize, 1]] = pixel[1] as f32 / 255.0;
-            input[[0, y as usize, x as usize, 2]] = pixel[2] as f32 / 255.0;
-        }
-    }
+    let normalized: Vec<f32> = canvas
+        .par_chunks_exact(4)
+        .flat_map_iter(|px| {
+            [
+                px[0] as f32 / 255.0,
+                px[1] as f32 / 255.0,
+                px[2] as f32 / 255.0,
+            ]
+        })
+        .collect();
+    let input = Array4::<f32>::from_shape_vec(
+        (1, INPUT_SIZE as usize, INPUT_SIZE as usize, 3),
+        normalized,
+    )
+    .map_err(|err| anyhow!("failed to build input tensor: {err}"))?;
 
     let letterbox = LetterboxInfo {
         scale,
-        pad_x,
-        pad_y,
+        pad_x: pad_x as f32,
+        pad_y: pad_y as f32,
         orig_w: frame.width,
         orig_h: frame.height,
     };
