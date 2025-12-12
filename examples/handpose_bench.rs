@@ -2,7 +2,7 @@
 mod model_download;
 
 use anyhow::{Context, Result};
-use image::{imageops::FilterType, RgbaImage};
+use image::{RgbaImage, imageops::FilterType};
 use model_download::{default_model_path, ensure_model_available};
 use std::{
     path::PathBuf,
@@ -10,7 +10,7 @@ use std::{
 };
 
 use ort::{
-    session::{builder::GraphOptimizationLevel, Session},
+    session::{Session, builder::GraphOptimizationLevel},
     value::Tensor as OrtTensor,
 };
 

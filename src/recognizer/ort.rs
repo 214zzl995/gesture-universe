@@ -1,8 +1,8 @@
 use std::{path::PathBuf, thread};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender};
-use ort::session::{builder::GraphOptimizationLevel, Session};
+use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::Tensor;
 
 use super::{
@@ -12,13 +12,13 @@ use super::{
 };
 use crate::{
     model_download::ensure_model_available,
-    types::{Frame, GestureResult},
+    types::{Frame, RecognizedFrame},
 };
 
 pub fn start_worker(
     model_path: PathBuf,
     frame_rx: Receiver<Frame>,
-    result_tx: Sender<GestureResult>,
+    result_tx: Sender<RecognizedFrame>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         if let Err(err) = ensure_model_available(&model_path) {

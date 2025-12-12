@@ -8,13 +8,13 @@ mod recognizer_common;
 #[path = "../src/types.rs"]
 mod types;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use gesture::GestureClassifier;
 use std::path::PathBuf;
 use types::Frame;
 
 use ort::{
-    session::{builder::GraphOptimizationLevel, Session},
+    session::{Session, builder::GraphOptimizationLevel},
     value::Tensor as OrtTensor,
 };
 

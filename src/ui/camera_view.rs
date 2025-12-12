@@ -550,19 +550,15 @@ impl AppView {
     fn start_camera_for_device(&mut self, device: &CameraDevice) -> Result<(), String> {
         self.stop_camera_stream();
 
-        camera::start_camera_stream(
-            device.index.clone(),
-            self.frame_tx.clone(),
-            self.frame_to_rec_tx.clone(),
-        )
-        .map(|stream| {
-            self.camera_stream = Some(stream);
-            self.latest_frame = None;
-            self.latest_result = None;
-            self.latest_image = None;
-            self.camera_error = None;
-        })
-        .map_err(|err| format!("{err:#}"))
+        camera::start_camera_stream(device.index.clone(), self.frame_to_rec_tx.clone())
+            .map(|stream| {
+                self.camera_stream = Some(stream);
+                self.latest_frame = None;
+                self.latest_result = None;
+                self.latest_image = None;
+                self.camera_error = None;
+            })
+            .map_err(|err| format!("{err:#}"))
     }
 
     fn start_selected_camera(&mut self) {

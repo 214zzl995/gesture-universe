@@ -19,6 +19,12 @@ pub struct GestureResult {
     pub detail: Option<GestureDetail>,
 }
 
+#[derive(Clone, Debug)]
+pub struct RecognizedFrame {
+    pub frame: Frame,
+    pub result: GestureResult,
+}
+
 impl GestureResult {
     #[allow(dead_code)]
     pub fn display_text(&self) -> String {

@@ -21,7 +21,7 @@ pub(super) fn frame_to_image(
     Some(Arc::new(RenderImage::new(vec![frame])))
 }
 
-fn draw_skeleton(buffer: &mut [u8], width: u32, height: u32, points: &[(f32, f32)]) {
+pub(super) fn draw_skeleton(buffer: &mut [u8], width: u32, height: u32, points: &[(f32, f32)]) {
     if points.len() < 2 {
         return;
     }

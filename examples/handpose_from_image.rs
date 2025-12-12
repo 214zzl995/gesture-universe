@@ -1,13 +1,13 @@
 #[path = "../src/model_download.rs"]
 mod model_download;
 
-use anyhow::{anyhow, Context, Result};
-use image::{imageops::FilterType, Rgba, RgbaImage};
+use anyhow::{Context, Result, anyhow};
+use image::{Rgba, RgbaImage, imageops::FilterType};
 use model_download::{default_model_path, ensure_model_available};
 use std::path::PathBuf;
 
 use ort::{
-    session::{builder::GraphOptimizationLevel, Session},
+    session::{Session, builder::GraphOptimizationLevel},
     value::Tensor as OrtTensor,
 };
 

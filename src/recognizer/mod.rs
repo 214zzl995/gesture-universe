@@ -8,7 +8,7 @@ use crossbeam_channel::{Receiver, Sender};
 use crate::{
     gesture::GestureClassifier,
     model_download::default_model_path,
-    types::{Frame, GestureResult},
+    types::{Frame, GestureResult, RecognizedFrame},
 };
 
 use self::common::HandposeOutput;
@@ -20,7 +20,7 @@ pub(crate) trait HandposeEngine: Send + 'static {
 fn run_worker_loop<E: HandposeEngine>(
     mut engine: E,
     frame_rx: Receiver<Frame>,
-    result_tx: Sender<GestureResult>,
+    result_tx: Sender<RecognizedFrame>,
 ) {
     let mut classifier = GestureClassifier::new();
 
@@ -28,7 +28,11 @@ fn run_worker_loop<E: HandposeEngine>(
         match engine.infer(&frame) {
             Ok(output) => {
                 let gesture = build_gesture_result(output, &frame, &mut classifier);
-                let _ = result_tx.try_send(gesture);
+                let recognized = RecognizedFrame {
+                    frame,
+                    result: gesture,
+                };
+                let _ = result_tx.try_send(recognized);
             }
             Err(err) => {
                 log::warn!("handpose inference failed: {err:?}");
@@ -71,7 +75,7 @@ impl Default for RecognizerBackend {
 pub fn start_recognizer(
     backend: RecognizerBackend,
     frame_rx: Receiver<Frame>,
-    result_tx: Sender<GestureResult>,
+    result_tx: Sender<RecognizedFrame>,
 ) -> thread::JoinHandle<()> {
     log::info!("starting handpose backend: {}", backend.label());
 

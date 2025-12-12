@@ -6,7 +6,7 @@ use model_download::{default_model_path, ensure_model_available};
 use std::path::PathBuf;
 
 use ort::{
-    session::{builder::GraphOptimizationLevel, Session},
+    session::{Session, builder::GraphOptimizationLevel},
     value::ValueType,
 };
 

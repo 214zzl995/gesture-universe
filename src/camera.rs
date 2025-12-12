@@ -111,11 +111,7 @@ fn build_camera(index: CameraIndex) -> Result<Camera> {
     Err(last_err.unwrap_or_else(|| anyhow!("failed to open camera with any supported format")))
 }
 
-pub fn start_camera_stream(
-    index: CameraIndex,
-    ui_tx: Sender<Frame>,
-    recog_tx: Sender<Frame>,
-) -> Result<CameraStream> {
+pub fn start_camera_stream(index: CameraIndex, recog_tx: Sender<Frame>) -> Result<CameraStream> {
     // Fail fast before spawning the capture thread.
     build_camera(index.clone())?;
 
@@ -176,9 +172,6 @@ pub fn start_camera_stream(
             } else {
                 None
             };
-
-            // Send the raw frame to the UI; if the UI queue is full we drop it.
-            let _ = ui_tx.try_send(frame);
 
             // Throttle recognizer input to ~10fps and drop if the worker is busy.
             if let Some(frame) = recog_frame {

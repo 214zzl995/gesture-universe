@@ -20,11 +20,14 @@ use crate::{
     camera::{self, CameraDevice, CameraStream},
     model_download::{DownloadEvent, ensure_model_available_with_callback},
     recognizer::{self, RecognizerBackend},
-    types::{Frame, GestureResult},
+    types::{Frame, GestureResult, RecognizedFrame},
 };
+
+use self::frame_pipeline::CompositedFrame;
 
 mod camera_view;
 mod download;
+mod frame_pipeline;
 mod main_view;
 mod render_util;
 mod titlebar;
@@ -67,12 +70,8 @@ const STARTUP_CARD_WIDTH: f32 = 420.0;
 
 pub fn launch_ui(
     app: &mut App,
-    frame_rx: Receiver<Frame>,
-    result_rx: Receiver<GestureResult>,
     frame_to_rec_rx: Receiver<Frame>,
-    frame_tx: Sender<Frame>,
     frame_to_rec_tx: Sender<Frame>,
-    result_tx: Sender<GestureResult>,
     recognizer_backend: RecognizerBackend,
 ) -> gpui::Result<()> {
     let window_options = WindowOptions {
@@ -93,17 +92,7 @@ pub fn launch_ui(
     };
 
     app.open_window(window_options, move |window, app| {
-        let view = app.new(|_| {
-            AppView::new(
-                frame_rx,
-                result_rx,
-                frame_to_rec_rx,
-                frame_tx,
-                frame_to_rec_tx,
-                result_tx,
-                recognizer_backend,
-            )
-        });
+        let view = app.new(|_| AppView::new(frame_to_rec_rx, frame_to_rec_tx, recognizer_backend));
         app.new(|cx| {
             let root = Root::new(view, window, cx);
             #[cfg(target_os = "macos")]
@@ -120,13 +109,12 @@ pub fn launch_ui(
 
 struct AppView {
     screen: Screen,
-    frame_rx: Option<Receiver<Frame>>,
-    result_rx: Option<Receiver<GestureResult>>,
+    composited_rx: Option<Receiver<CompositedFrame>>,
     frame_to_rec_rx: Option<Receiver<Frame>>,
-    frame_tx: Sender<Frame>,
     frame_to_rec_tx: Sender<Frame>,
-    result_tx: Option<Sender<GestureResult>>,
+    recognized_tx: Sender<RecognizedFrame>,
     recognizer_backend: RecognizerBackend,
+    _frame_compositor_handle: thread::JoinHandle<()>,
     recognizer_handle: Option<thread::JoinHandle<()>>,
     camera_stream: Option<CameraStream>,
     available_cameras: Vec<CameraDevice>,
@@ -195,14 +183,13 @@ struct PanelResizeState {
 
 impl AppView {
     fn new(
-        frame_rx: Receiver<Frame>,
-        result_rx: Receiver<GestureResult>,
         frame_to_rec_rx: Receiver<Frame>,
-        frame_tx: Sender<Frame>,
         frame_to_rec_tx: Sender<Frame>,
-        result_tx: Sender<GestureResult>,
         recognizer_backend: RecognizerBackend,
     ) -> Self {
+        let (recognized_tx, recognized_rx) = crossbeam_channel::bounded(1);
+        let (composited_rx, compositor_handle) =
+            frame_pipeline::start_frame_compositor(recognized_rx);
         let (download_tx, download_rx) = unbounded();
         let download_handle =
             download::spawn_model_download(recognizer_backend.clone(), download_tx);
@@ -215,13 +202,12 @@ impl AppView {
 
         Self {
             screen: Screen::Download(DownloadState::new()),
-            frame_rx: Some(frame_rx),
-            result_rx: Some(result_rx),
+            composited_rx: Some(composited_rx),
             frame_to_rec_rx: Some(frame_to_rec_rx),
-            frame_tx,
             frame_to_rec_tx,
-            result_tx: Some(result_tx),
+            recognized_tx,
             recognizer_backend,
+            _frame_compositor_handle: compositor_handle,
             recognizer_handle: None,
             camera_stream: None,
             available_cameras,
@@ -248,13 +234,9 @@ impl AppView {
             log::warn!("missing frame receiver for recognizer");
             return;
         };
-        let Some(result_tx) = self.result_tx.take() else {
-            log::warn!("missing result sender for recognizer");
-            return;
-        };
 
         let backend = self.recognizer_backend.clone();
-        let handle = recognizer::start_recognizer(backend, frame_rx, result_tx);
+        let handle = recognizer::start_recognizer(backend, frame_rx, self.recognized_tx.clone());
         self.recognizer_handle = Some(handle);
     }
 }

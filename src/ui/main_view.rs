@@ -1,3 +1,4 @@
+use super::frame_pipeline::CompositedFrame;
 use super::render_util::frame_to_image;
 use super::{
     ActiveTheme, AnyElement, AppView, Button, Context, DEFAULT_CAMERA_RATIO, FluentBuilder,
@@ -15,37 +16,25 @@ impl AppView {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
-        let result_rx = self.result_rx.take();
-        if let Some(rx) = result_rx.as_ref() {
-            while let Ok(result) = rx.try_recv() {
-                self.latest_result = Some(result);
-            }
-        }
-        self.result_rx = result_rx;
-
-        let frame_rx = self.frame_rx.take();
-        if let Some(rx) = frame_rx.as_ref() {
+        let composited_rx = self.composited_rx.take();
+        if let Some(rx) = composited_rx.as_ref() {
             let mut frames = Vec::new();
             while let Ok(frame) = rx.try_recv() {
                 frames.push(frame);
             }
 
             for frame in frames {
-                let overlay = self.latest_result.as_ref().and_then(|r| {
-                    if r.confidence >= 0.5 {
-                        r.landmarks.as_ref().map(|v| v.as_slice())
-                    } else {
-                        None
-                    }
-                });
+                let CompositedFrame { frame, result } = frame;
 
-                if let Some(image) = frame_to_image(&frame, overlay) {
+                self.latest_result = Some(result);
+
+                if let Some(image) = frame_to_image(&frame, None) {
                     self.replace_latest_image(image, window, cx);
                 }
                 self.latest_frame = Some(frame);
             }
         }
-        self.frame_rx = frame_rx;
+        self.composited_rx = composited_rx;
 
         let camera_label = self
             .selected_camera_idx
