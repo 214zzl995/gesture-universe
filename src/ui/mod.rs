@@ -94,6 +94,8 @@ struct AppView {
     latest_frame: Option<Frame>,
     latest_result: Option<GestureResult>,
     latest_image: Option<Arc<RenderImage>>,
+    latest_fps: Option<f32>,
+    last_frame_ts: Option<Instant>,
     download_rx: Receiver<DownloadMessage>,
     _download_handle: thread::JoinHandle<()>,
     camera_picker_open: bool,
@@ -186,6 +188,8 @@ impl AppView {
             latest_frame: None,
             latest_result: None,
             latest_image: None,
+            latest_fps: None,
+            last_frame_ts: None,
             download_rx,
             _download_handle: download_handle,
             camera_picker_open: false,
@@ -208,6 +212,22 @@ impl AppView {
         let backend = self.recognizer_backend.clone();
         let handle = start_recognizer(backend, frame_rx, self.recognized_tx.clone());
         self.recognizer_handle = Some(handle);
+    }
+
+    fn update_fps(&mut self, ts: Instant) {
+        if let Some(prev) = self.last_frame_ts.replace(ts) {
+            if let Some(delta) = ts.checked_duration_since(prev) {
+                if delta.as_secs_f32() > 0.0 {
+                    let current = 1.0 / delta.as_secs_f32();
+                    let smoothed = if let Some(prev_fps) = self.latest_fps {
+                        prev_fps * 0.8 + current * 0.2
+                    } else {
+                        current
+                    };
+                    self.latest_fps = Some(smoothed.min(240.0));
+                }
+            }
+        }
     }
 }
 

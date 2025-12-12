@@ -32,6 +32,9 @@ impl AppView {
                     self.replace_latest_image(image, window, cx);
                 }
                 self.latest_frame = Some(frame);
+                if let Some(ts) = self.latest_frame.as_ref().map(|f| f.timestamp) {
+                    self.update_fps(ts);
+                }
             }
         }
         self.composited_rx = composited_rx;
@@ -59,6 +62,11 @@ impl AppView {
             .as_ref()
             .map(|r| format!("{:.0}%", r.confidence * 100.0))
             .unwrap_or_else(|| "--".to_string());
+        let fps_text = self
+            .latest_fps
+            .as_ref()
+            .map(|v| format!("{:.1} fps", v))
+            .unwrap_or_else(|| "-- fps".to_string());
 
         let ratio = self.camera_aspect_ratio();
         let panel_width = self
@@ -120,12 +128,27 @@ impl AppView {
             );
         }
 
-        let mut info_row = h_flex().justify_between().items_center().gap_2().child(
-            super::div()
-                .text_xs()
-                .text_color(gpui::rgb(0xa0aab8))
-                .child(format!("置信度: {confidence_text}")),
-        );
+        let metrics = h_flex()
+            .gap_3()
+            .items_center()
+            .child(
+                super::div()
+                    .text_xs()
+                    .text_color(gpui::rgb(0xa0aab8))
+                    .child(format!("置信度: {confidence_text}")),
+            )
+            .child(
+                super::div()
+                    .text_xs()
+                    .text_color(gpui::rgb(0xa0aab8))
+                    .child(format!("帧率: {fps_text}")),
+            );
+
+        let mut info_row = h_flex()
+            .justify_between()
+            .items_center()
+            .gap_2()
+            .child(metrics);
 
         if self.available_cameras.len() > 1 {
             let picker_label = if self.camera_picker_open {
