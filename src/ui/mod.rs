@@ -17,48 +17,19 @@ use gpui_component::{ActiveTheme, Root, StyledExt, button::Button, h_flex, v_fle
 use image::{Frame as ImageFrame, ImageBuffer, Rgba};
 
 use crate::{
-    camera::{self, CameraDevice, CameraStream},
     model_download::{DownloadEvent, ensure_model_available_with_callback},
-    recognizer::{self, RecognizerBackend},
+    pipeline::{
+        CameraDevice, CameraStream, CompositedFrame, RecognizerBackend, start_frame_compositor,
+        start_recognizer,
+    },
     types::{Frame, GestureResult, RecognizedFrame},
 };
 
-use self::frame_pipeline::CompositedFrame;
-
 mod camera_view;
 mod download;
-mod frame_pipeline;
 mod main_view;
 mod render_util;
 mod titlebar;
-
-const CONNECTIONS: &[(usize, usize)] = &[
-    (0, 1),
-    (1, 2),
-    (2, 3),
-    (3, 4),
-    (0, 5),
-    (5, 6),
-    (6, 7),
-    (7, 8),
-    (0, 9),
-    (9, 10),
-    (10, 11),
-    (11, 12),
-    (0, 13),
-    (13, 14),
-    (14, 15),
-    (15, 16),
-    (0, 17),
-    (17, 18),
-    (18, 19),
-    (19, 20),
-    (5, 9),
-    (9, 13),
-    (13, 17),
-];
-
-const SKELETON_LINE_THICKNESS: i32 = 12;
 
 const CAMERA_MIN_SIZE: (f32, f32) = (240.0, 180.0);
 const CAMERA_MAX_SIZE: (f32, f32) = (720.0, 540.0);
@@ -188,8 +159,7 @@ impl AppView {
         recognizer_backend: RecognizerBackend,
     ) -> Self {
         let (recognized_tx, recognized_rx) = crossbeam_channel::bounded(1);
-        let (composited_rx, compositor_handle) =
-            frame_pipeline::start_frame_compositor(recognized_rx);
+        let (composited_rx, compositor_handle) = start_frame_compositor(recognized_rx);
         let (download_tx, download_rx) = unbounded();
         let download_handle =
             download::spawn_model_download(recognizer_backend.clone(), download_tx);
@@ -236,7 +206,7 @@ impl AppView {
         };
 
         let backend = self.recognizer_backend.clone();
-        let handle = recognizer::start_recognizer(backend, frame_rx, self.recognized_tx.clone());
+        let handle = start_recognizer(backend, frame_rx, self.recognized_tx.clone());
         self.recognizer_handle = Some(handle);
     }
 }

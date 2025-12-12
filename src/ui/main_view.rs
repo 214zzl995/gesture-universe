@@ -1,4 +1,3 @@
-use super::frame_pipeline::CompositedFrame;
 use super::render_util::frame_to_image;
 use super::{
     ActiveTheme, AnyElement, AppView, Button, Context, DEFAULT_CAMERA_RATIO, FluentBuilder,
@@ -6,6 +5,7 @@ use super::{
     ObjectFit, PanelResizeState, ParentElement, RIGHT_PANEL_MAX_WIDTH, RIGHT_PANEL_MIN_WIDTH,
     SharedString, Styled, StyledImage, Window, h_flex, v_flex,
 };
+use crate::pipeline::CompositedFrame;
 use crate::types::{FingerState, GestureMotion};
 use gpui_component::StyledExt;
 use std::sync::Arc;

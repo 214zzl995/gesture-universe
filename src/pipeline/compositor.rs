@@ -5,9 +5,10 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::types::{Frame, GestureResult, RecognizedFrame};
-
-use super::render_util;
+use crate::{
+    pipeline::skeleton,
+    types::{Frame, GestureResult, RecognizedFrame},
+};
 
 const MAX_COMPOSITED_FPS: u64 = 30;
 const MIN_COMPOSITED_FPS: u64 = 12;
@@ -16,12 +17,12 @@ const RECOVERY_FACTOR: f64 = 0.85;
 const OVERLAY_CONFIDENCE_THRESHOLD: f32 = 0.5;
 
 #[derive(Clone, Debug)]
-pub(super) struct CompositedFrame {
+pub struct CompositedFrame {
     pub frame: Frame,
     pub result: GestureResult,
 }
 
-pub(super) fn start_frame_compositor(
+pub fn start_frame_compositor(
     recognized_rx: Receiver<RecognizedFrame>,
 ) -> (Receiver<CompositedFrame>, thread::JoinHandle<()>) {
     let (tx, rx) = crossbeam_channel::bounded(1);
@@ -47,7 +48,7 @@ fn compositor_loop(
 
         let compose_start = Instant::now();
         if let Some(points) = overlay_points(&result) {
-            render_util::draw_skeleton(&mut frame.rgba, frame.width, frame.height, points);
+            skeleton::draw_skeleton(&mut frame.rgba, frame.width, frame.height, points);
         }
         let compose_time = compose_start.elapsed();
 

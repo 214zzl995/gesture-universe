@@ -1,8 +1,9 @@
 use super::{
     ActiveTheme, AnyElement, AppView, CameraDevice, CameraState, Context, FluentBuilder,
-    InteractiveElement, IntoElement, ParentElement, Screen, Styled, StyledExt, Window, camera, div,
-    h_flex, v_flex,
+    InteractiveElement, IntoElement, ParentElement, Screen, Styled, StyledExt, Window, div, h_flex,
+    v_flex,
 };
+use crate::pipeline;
 
 impl AppView {
     fn render_camera_picker_startup(
@@ -281,7 +282,7 @@ impl AppView {
     }
 
     pub(super) fn initial_camera_state() -> (CameraState, Vec<CameraDevice>) {
-        match camera::available_cameras() {
+        match pipeline::available_cameras() {
             Ok(cameras) if cameras.is_empty() => (
                 CameraState::Unavailable {
                     message: String::new(),
@@ -550,7 +551,7 @@ impl AppView {
     fn start_camera_for_device(&mut self, device: &CameraDevice) -> Result<(), String> {
         self.stop_camera_stream();
 
-        camera::start_camera_stream(device.index.clone(), self.frame_to_rec_tx.clone())
+        pipeline::start_camera_stream(device.index.clone(), self.frame_to_rec_tx.clone())
             .map(|stream| {
                 self.camera_stream = Some(stream);
                 self.latest_frame = None;

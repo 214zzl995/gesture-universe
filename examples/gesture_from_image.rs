@@ -2,7 +2,7 @@
 mod gesture;
 #[path = "../src/model_download.rs"]
 mod model_download;
-#[path = "../src/recognizer/common.rs"]
+#[path = "../src/pipeline/recognizer/common.rs"]
 mod recognizer_common;
 #[allow(dead_code)]
 #[path = "../src/types.rs"]

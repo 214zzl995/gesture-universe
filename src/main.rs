@@ -1,9 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod camera;
 mod gesture;
 mod model_download;
-mod recognizer;
+mod pipeline;
 mod types;
 mod ui;
 
@@ -11,7 +10,7 @@ use anyhow::Result;
 use crossbeam_channel::bounded;
 use gpui::Application;
 use gpui_component;
-use recognizer::RecognizerBackend;
+use pipeline::RecognizerBackend;
 
 fn main() -> Result<()> {
     env_logger::init();
