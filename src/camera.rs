@@ -21,7 +21,7 @@ use nokhwa::{
 use crate::types::Frame;
 
 // Limit the number of frames we hand over to the recognizer to reduce load.
-const RECOGNIZER_TARGET_FPS: u64 = 10;
+const RECOGNIZER_TARGET_FPS: u64 = 30;
 const RECOGNIZER_FRAME_INTERVAL: Duration = Duration::from_millis(1_000 / RECOGNIZER_TARGET_FPS);
 
 // Prefer pixel formats that are widely supported on macOS (the built-in cameras
