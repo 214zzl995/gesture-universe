@@ -1,10 +1,21 @@
+#[cfg(all(feature = "backend-tract", feature = "backend-ort"))]
+compile_error!("Enable exactly one backend feature: backend-tract or backend-ort.");
+#[cfg(not(any(feature = "backend-tract", feature = "backend-ort")))]
+compile_error!("Enable at least one backend feature: backend-tract or backend-ort.");
+
 #[path = "../src/model_download.rs"]
 mod model_download;
 
+use anyhow::Result;
 use model_download::{default_model_path, ensure_model_available};
 use std::path::PathBuf;
 
-use anyhow::Result;
+#[cfg(feature = "backend-ort")]
+use ort::{
+    session::{builder::GraphOptimizationLevel, Session},
+    value::ValueType,
+};
+#[cfg(feature = "backend-tract")]
 use tract_onnx::prelude::*;
 
 fn main() -> Result<()> {
@@ -17,7 +28,14 @@ fn main() -> Result<()> {
 
     println!("Loading model: {}", model_path.display());
     ensure_model_available(&model_path)?;
-    let mut model = tract_onnx::onnx().model_for_path(&model_path)?;
+    print_model_info(&model_path)?;
+
+    Ok(())
+}
+
+#[cfg(feature = "backend-tract")]
+fn print_model_info(model_path: &PathBuf) -> Result<()> {
+    let mut model = tract_onnx::onnx().model_for_path(model_path)?;
 
     // The ONNX graph leaves some dims symbolic; seed the expected input shape so we
     // can infer output shapes.
@@ -54,6 +72,38 @@ fn main() -> Result<()> {
             fact.datum_type,
             fact.shape
         );
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "backend-ort")]
+fn print_model_info(model_path: &PathBuf) -> Result<()> {
+    let session = Session::builder()?
+        .with_optimization_level(GraphOptimizationLevel::Level3)?
+        .with_intra_threads(2)?
+        .commit_from_file(model_path)?;
+
+    println!("Inputs:");
+    for (idx, input) in session.inputs.iter().enumerate() {
+        println!(
+            "  {}: name=\"{}\" type={:?}",
+            idx, input.name, input.input_type
+        );
+        if let ValueType::Tensor { shape, .. } = &input.input_type {
+            println!("     shape={:?}", shape);
+        }
+    }
+
+    println!("Outputs:");
+    for (idx, output) in session.outputs.iter().enumerate() {
+        println!(
+            "  {}: name=\"{}\" type={:?}",
+            idx, output.name, output.output_type
+        );
+        if let ValueType::Tensor { shape, .. } = &output.output_type {
+            println!("     shape={:?}", shape);
+        }
     }
 
     Ok(())

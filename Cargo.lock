@@ -1853,7 +1853,7 @@ dependencies = [
  "lebe",
  "miniz_oxide",
  "rayon-core",
- "smallvec",
+ "smallvec 1.15.1",
  "zune-inflate",
 ]
 
@@ -2258,7 +2258,9 @@ dependencies = [
  "image",
  "indicatif",
  "log",
+ "ndarray",
  "nokhwa",
+ "ort",
  "reqwest",
  "thiserror 1.0.69",
  "tract-onnx",
@@ -2465,7 +2467,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slotmap",
- "smallvec",
+ "smallvec 1.15.1",
  "smol",
  "stacksafe",
  "strum 0.27.2",
@@ -2520,7 +2522,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_repr",
- "smallvec",
+ "smallvec 1.15.1",
  "smol",
  "tracing",
  "tree-sitter",
@@ -2985,7 +2987,7 @@ dependencies = [
  "itoa",
  "pin-project-lite",
  "pin-utils",
- "smallvec",
+ "smallvec 1.15.1",
  "tokio",
  "want",
 ]
@@ -3102,7 +3104,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
- "smallvec",
+ "smallvec 1.15.1",
  "zerovec",
 ]
 
@@ -3154,7 +3156,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b0875f23caa03898994f6ddc501886a45c7d3d62d04d2d90788d47be1b1e4de"
 dependencies = [
  "idna_adapter",
- "smallvec",
+ "smallvec 1.15.1",
  "utf8_iter",
 ]
 
@@ -3500,7 +3502,7 @@ checksum = "c62026ae44756f8a599ba21140f350303d4f08dcdcc71b5ad9c9bb8128c13c62"
 dependencies = [
  "arrayvec",
  "euclid",
- "smallvec",
+ "smallvec 1.15.1",
 ]
 
 [[package]]
@@ -4255,7 +4257,7 @@ dependencies = [
  "num-traits",
  "rand 0.8.5",
  "serde",
- "smallvec",
+ "smallvec 1.15.1",
  "zeroize",
 ]
 
@@ -4559,6 +4561,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "ort"
+version = "2.0.0-rc.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa7e49bd669d32d7bc2a15ec540a527e7764aec722a45467814005725bcd721"
+dependencies = [
+ "ndarray",
+ "ort-sys",
+ "smallvec 2.0.0-alpha.10",
+ "tracing",
+]
+
+[[package]]
+name = "ort-sys"
+version = "2.0.0-rc.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2aba9f5c7c479925205799216e7e5d07cc1d4fa76ea8058c60a9a30f6a4e890"
+dependencies = [
+ "pkg-config",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4583,7 +4606,7 @@ dependencies = [
  "cfg-if 1.0.4",
  "libc",
  "redox_syscall 0.5.18",
- "smallvec",
+ "smallvec 1.15.1",
  "windows-link 0.2.1",
 ]
 
@@ -5510,7 +5533,7 @@ dependencies = [
  "regex",
  "rust-i18n-macro",
  "rust-i18n-support",
- "smallvec",
+ "smallvec 1.15.1",
 ]
 
 [[package]]
@@ -5716,7 +5739,7 @@ dependencies = [
  "bitflags 2.10.0",
  "bytemuck",
  "libm",
- "smallvec",
+ "smallvec 1.15.1",
  "ttf-parser 0.21.1",
  "unicode-bidi-mirroring 0.2.0",
  "unicode-ccc 0.2.0",
@@ -5734,7 +5757,7 @@ dependencies = [
  "bytemuck",
  "core_maths",
  "log",
- "smallvec",
+ "smallvec 1.15.1",
  "ttf-parser 0.25.1",
  "unicode-bidi-mirroring 0.4.0",
  "unicode-ccc 0.4.0",
@@ -6119,6 +6142,12 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "smallvec"
+version = "2.0.0-alpha.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51d44cfb396c3caf6fbfd0ab422af02631b69ddd96d2eff0b0f0724f9024051b"
 
 [[package]]
 name = "smol"
@@ -7006,7 +7035,7 @@ dependencies = [
  "num-traits",
  "paste",
  "rustfft",
- "smallvec",
+ "smallvec 1.15.1",
  "tract-data",
  "tract-linalg",
 ]
@@ -7031,7 +7060,7 @@ dependencies = [
  "num-traits",
  "parking_lot",
  "scan_fmt",
- "smallvec",
+ "smallvec 1.15.1",
  "string-interner",
 ]
 
@@ -7068,7 +7097,7 @@ dependencies = [
  "paste",
  "rayon",
  "scan_fmt",
- "smallvec",
+ "smallvec 1.15.1",
  "time",
  "tract-data",
  "unicode-normalization",
@@ -7102,7 +7131,7 @@ dependencies = [
  "memmap2",
  "num-integer",
  "prost",
- "smallvec",
+ "smallvec 1.15.1",
  "tract-hir",
  "tract-nnef",
  "tract-onnx-opl",
@@ -7618,7 +7647,7 @@ dependencies = [
  "downcast-rs",
  "rustix 1.1.2",
  "scoped-tls",
- "smallvec",
+ "smallvec 1.15.1",
  "wayland-sys",
 ]
 
