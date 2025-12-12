@@ -58,7 +58,7 @@ impl AppView {
         };
 
         let mut container = v_flex()
-            .w(px(420.0))
+            .w(px(super::STARTUP_CARD_WIDTH))
             .gap_4()
             .p_6()
             .rounded_xl()

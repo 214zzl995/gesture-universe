@@ -13,7 +13,7 @@ impl AppView {
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
         let mut picker = v_flex()
-            .w(super::px(400.0))
+            .w(super::px(super::STARTUP_CARD_WIDTH))
             .gap_2()
             .p_4()
             .rounded_xl()
@@ -341,7 +341,7 @@ impl AppView {
                 .bg(gpui::rgb(0x1a2332))
                 .child(
                     v_flex()
-                        .w(super::px(400.0))
+                        .w(super::px(super::STARTUP_CARD_WIDTH))
                         .gap_2()
                         .p_4()
                         .rounded_xl()
@@ -468,7 +468,7 @@ impl AppView {
                     .items_center()
                     .justify_center()
                     .bg(gpui::rgb(0x1a2332))
-                    .child(div().w(super::px(450.0)).child(picker))
+                    .child(picker)
                     .into_any_element()
             }
             CameraState::Ready => {

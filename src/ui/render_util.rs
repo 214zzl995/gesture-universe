@@ -26,7 +26,7 @@ fn draw_skeleton(buffer: &mut [u8], width: u32, height: u32, points: &[(f32, f32
         return;
     }
 
-    let line_color = [96u8, 165u8, 250u8, 0u8];
+    let line_color = [56u8, 189u8, 248u8, 255u8];
     for &(a, b) in CONNECTIONS {
         if let (Some(pa), Some(pb)) = (points.get(a), points.get(b)) {
             draw_line(
@@ -41,9 +41,17 @@ fn draw_skeleton(buffer: &mut [u8], width: u32, height: u32, points: &[(f32, f32
         }
     }
 
-    let point_color = [59u8, 130u8, 246u8, 0u8];
+    let point_color = [248u8, 113u8, 113u8, 255u8];
+    let point_radius = (SKELETON_LINE_THICKNESS / 2).max(4) + 2;
     for &(x, y) in points {
-        draw_circle(buffer, width, height, (x as i32, y as i32), 3, point_color);
+        draw_circle(
+            buffer,
+            width,
+            height,
+            (x as i32, y as i32),
+            point_radius,
+            point_color,
+        );
     }
 }
 

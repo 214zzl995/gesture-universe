@@ -55,7 +55,7 @@ const CONNECTIONS: &[(usize, usize)] = &[
     (13, 17),
 ];
 
-const SKELETON_LINE_THICKNESS: i32 = 3;
+const SKELETON_LINE_THICKNESS: i32 = 12;
 
 const CAMERA_MIN_SIZE: (f32, f32) = (240.0, 180.0);
 const CAMERA_MAX_SIZE: (f32, f32) = (720.0, 540.0);
@@ -63,6 +63,7 @@ const DEFAULT_CAMERA_RATIO: f32 = 4.0 / 3.0;
 const RIGHT_PANEL_MIN_WIDTH: f32 = 320.0;
 const RIGHT_PANEL_MAX_WIDTH: f32 = 720.0;
 const RIGHT_PANEL_INITIAL_WIDTH: f32 = 480.0;
+const STARTUP_CARD_WIDTH: f32 = 420.0;
 
 pub fn launch_ui(
     app: &mut App,
@@ -103,7 +104,15 @@ pub fn launch_ui(
                 recognizer_backend,
             )
         });
-        app.new(|cx| Root::new(view, window, cx))
+        app.new(|cx| {
+            let root = Root::new(view, window, cx);
+            #[cfg(target_os = "macos")]
+            {
+                cx.activate(true);
+                window.activate_window();
+            }
+            root
+        })
     })?;
 
     Ok(())
