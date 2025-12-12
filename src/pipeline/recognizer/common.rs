@@ -1,5 +1,5 @@
-use fast_image_resize as fir;
 use anyhow::{Context, Result, anyhow};
+use fast_image_resize as fir;
 use ndarray::Array4;
 use rayon::prelude::*;
 
@@ -40,6 +40,7 @@ pub fn prepare_frame(frame: &Frame) -> Result<(Array4<f32>, LetterboxInfo)> {
     let scale = INPUT_SIZE as f32 / (frame.width.max(frame.height) as f32);
     let new_w = (frame.width as f32 * scale).round().max(1.0) as u32;
     let new_h = (frame.height as f32 * scale).round().max(1.0) as u32;
+
     let src_image = fir::images::Image::from_vec_u8(
         frame.width,
         frame.height,

@@ -17,6 +17,7 @@ use nokhwa::{
         ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType,
     },
 };
+use rayon::prelude::*;
 
 use crate::types::Frame;
 
@@ -147,14 +148,21 @@ pub fn start_camera_stream(index: CameraIndex, recog_tx: Sender<Frame>) -> Resul
             }
 
             // Expand RGB to RGBA for the UI pipeline.
-            let mut rgba = Vec::with_capacity(rgb.len() / 3 * 4);
-            for chunk in rgb.chunks_exact(3) {
-                rgba.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
-            }
+            let pixel_count = rgb.len() / 3;
+            let mut rgba_bytes = vec![0u8; pixel_count * 4];
+            rgba_bytes
+                .par_chunks_mut(4)
+                .zip(rgb.par_chunks_exact(3))
+                .for_each(|(dst, src)| {
+                    dst[0] = src[0];
+                    dst[1] = src[1];
+                    dst[2] = src[2];
+                    dst[3] = 255;
+                });
 
             let frame_timestamp = Instant::now();
             let frame = Frame {
-                rgba,
+                rgba: rgba_bytes,
                 width,
                 height,
                 timestamp: frame_timestamp,
