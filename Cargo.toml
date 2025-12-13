@@ -52,9 +52,9 @@ nokhwa = { version = "0.10", default-features = false, features = [
     "decoding",
 ], optional = true }
 yuv = { version = "0.8.9", default-features = false, features = [
+    "rdm",
     "avx",
     "sse",
-    "rdm",
     "fast_mode",
 ] }
 zune-jpeg = "0.5"

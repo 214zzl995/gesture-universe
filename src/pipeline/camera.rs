@@ -129,10 +129,7 @@ pub fn start_camera_stream(index: CameraIndex, recog_tx: Sender<Frame>) -> Resul
         while !stop_flag.load(Ordering::Relaxed) {
             let frame_start = Instant::now();
             let frame = match camera.frame() {
-                Ok(frame) => {
-                    log::debug!("camera.frame() took {:?}", frame_start.elapsed());
-                    frame
-                }
+                Ok(frame) => frame,
                 Err(err) => {
                     log::warn!(
                         "camera frame read failed (after {:?}): {err:?}",
@@ -147,10 +144,7 @@ pub fn start_camera_stream(index: CameraIndex, recog_tx: Sender<Frame>) -> Resul
 
             let decode_start = Instant::now();
             let converted = match rgba_converter::convert_camera_frame(&frame) {
-                Ok(rgba) => {
-                    log::debug!("convert_camera_frame took {:?}", decode_start.elapsed());
-                    rgba
-                }
+                Ok(rgba) => rgba,
                 Err(err) => {
                     log::warn!(
                         "failed to decode camera frame (after {:?}): {err:?}",
