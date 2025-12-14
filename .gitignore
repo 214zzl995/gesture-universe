@@ -1,4 +1,5 @@
 /target
 /demo/image_with_landmarks.png
+/demo/image_with_palmmarks.png
 /.venv
 .DS_Store

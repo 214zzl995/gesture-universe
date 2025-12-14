@@ -1,8 +1,12 @@
+#[allow(dead_code)]
 #[path = "../src/model_download.rs"]
 mod model_download;
 
 use anyhow::Result;
-use model_download::{default_model_path, ensure_model_available};
+use model_download::{
+    default_handpose_estimator_model_path, default_palm_detector_model_path,
+    ensure_handpose_estimator_model_ready, ensure_palm_detector_model_ready,
+};
 use std::path::PathBuf;
 
 use ort::{
@@ -13,14 +17,19 @@ use ort::{
 fn main() -> Result<()> {
     env_logger::init();
 
-    let model_path = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(default_model_path);
+    let handpose_estimator_model = default_handpose_estimator_model_path();
 
-    println!("Loading model: {}", model_path.display());
-    ensure_model_available(&model_path)?;
-    print_model_info(&model_path)?;
+    println!("Loading model: {}", handpose_estimator_model.display());
+    ensure_handpose_estimator_model_ready(&handpose_estimator_model, |_evt| {})?;
+    print_model_info(&handpose_estimator_model)?;
+
+    let palm_detector_model = default_palm_detector_model_path();
+    println!(
+        "Loading model: {}",
+        default_palm_detector_model_path().display()
+    );
+    ensure_palm_detector_model_ready(&palm_detector_model, |_evt| {})?;
+    print_model_info(&palm_detector_model)?;
 
     Ok(())
 }

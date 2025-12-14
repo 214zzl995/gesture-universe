@@ -25,6 +25,8 @@ pub const CONNECTIONS: &[(usize, usize)] = &[
 ];
 
 pub const SKELETON_LINE_THICKNESS: i32 = 12;
+const PALM_BOX_THICKNESS: i32 = 6;
+const PALM_SCORE_THRESHOLD: f32 = 0.25;
 
 pub fn draw_skeleton(buffer: &mut [u8], width: u32, height: u32, points: &[(f32, f32)]) {
     if points.len() < 2 {
@@ -58,6 +60,83 @@ pub fn draw_skeleton(buffer: &mut [u8], width: u32, height: u32, points: &[(f32,
             point_color,
         );
     }
+}
+
+pub fn draw_palm_regions(
+    buffer: &mut [u8],
+    width: u32,
+    height: u32,
+    regions: &[crate::types::PalmRegion],
+) {
+    for region in regions {
+        if region.score < PALM_SCORE_THRESHOLD {
+            continue;
+        }
+        let [x1, y1, x2, y2] = region.bbox;
+        let rect_color = [16u8, 185u8, 129u8, 200u8];
+        draw_rect(buffer, width, height, x1, y1, x2, y2, rect_color, PALM_BOX_THICKNESS);
+
+        let point_color = [244u8, 114u8, 182u8, 230u8];
+        for &(lx, ly) in &region.landmarks {
+            draw_circle(
+                buffer,
+                width,
+                height,
+                (lx as i32, ly as i32),
+                (PALM_BOX_THICKNESS / 2).max(3),
+                point_color,
+            );
+        }
+    }
+}
+
+fn draw_rect(
+    buffer: &mut [u8],
+    width: u32,
+    height: u32,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    color: [u8; 4],
+    thickness: i32,
+) {
+    draw_line(
+        buffer,
+        width,
+        height,
+        &(x1, y1),
+        &(x2, y1),
+        color,
+        thickness,
+    );
+    draw_line(
+        buffer,
+        width,
+        height,
+        &(x2, y1),
+        &(x2, y2),
+        color,
+        thickness,
+    );
+    draw_line(
+        buffer,
+        width,
+        height,
+        &(x2, y2),
+        &(x1, y2),
+        color,
+        thickness,
+    );
+    draw_line(
+        buffer,
+        width,
+        height,
+        &(x1, y2),
+        &(x1, y1),
+        color,
+        thickness,
+    );
 }
 
 fn draw_line(

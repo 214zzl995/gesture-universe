@@ -7,31 +7,51 @@ use ort::value::Tensor;
 
 use super::{
     HandposeEngine,
+    RecognizerBackend,
     common::{self, HandposeOutput},
+    palm::{PalmDetector, PalmDetectorConfig, crop_from_palm, pick_primary_region},
     run_worker_loop,
 };
 use crate::{
-    model_download::ensure_model_available,
+    model_download::{
+        ensure_handpose_estimator_model_ready,
+        ensure_palm_detector_model_ready,
+    },
     types::{Frame, RecognizedFrame},
 };
 
 pub fn start_worker(
-    model_path: PathBuf,
+    backend: RecognizerBackend,
     frame_rx: Receiver<Frame>,
     result_tx: Sender<RecognizedFrame>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        if let Err(err) = ensure_model_available(&model_path) {
+        let handpose_estimator_model_path = backend.handpose_estimator_model_path();
+        let palm_detector_model_path = backend.palm_detector_model_path();
+
+        if let Err(err) = ensure_handpose_estimator_model_ready(&handpose_estimator_model_path, |_evt| {}) {
             log::error!(
                 "failed to prepare handpose model at {}: {err:?}",
-                model_path.display()
+                handpose_estimator_model_path.display()
             );
             return;
         }
 
-        let engine = match OrtEngine::new(&model_path) {
+        if let Err(err) = ensure_palm_detector_model_ready(&palm_detector_model_path, |_evt| {}) {
+            log::error!(
+                "failed to prepare palm detector model at {}: {err:?}",
+                palm_detector_model_path.display()
+            );
+            return;
+        }
+
+        let engine = match OrtEngine::new(&handpose_estimator_model_path, &palm_detector_model_path) {
             Ok(engine) => {
-                log::info!("handpose ORT backend ready using {}", model_path.display());
+                log::info!(
+                    "handpose ORT backend ready using {} and palm detector {}",
+                    handpose_estimator_model_path.display(),
+                    palm_detector_model_path.display()
+                );
                 engine
             }
             Err(err) => {
@@ -45,27 +65,54 @@ pub fn start_worker(
 }
 
 struct OrtEngine {
-    session: Session,
+    handpose: Session,
+    palm_detector: PalmDetector,
 }
 
 impl OrtEngine {
-    fn new(model_path: &PathBuf) -> Result<Self> {
-        let session = Session::builder()?
+    fn new(model_path: &PathBuf, palm_detector_model_path: &PathBuf) -> Result<Self> {
+        let handpose = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_intra_threads(2)?
             .commit_from_file(model_path)
             .with_context(|| format!("failed to load ORT session from {}", model_path.display()))?;
 
-        Ok(Self { session })
+        let palm_detector =
+            PalmDetector::new(palm_detector_model_path, PalmDetectorConfig::default())?;
+
+        Ok(Self {
+            handpose,
+            palm_detector,
+        })
     }
 }
 
 impl HandposeEngine for OrtEngine {
     fn infer(&mut self, frame: &Frame) -> Result<HandposeOutput> {
-        let (input, letterbox) = common::prepare_frame(frame)?;
+        let palm_regions = self.palm_detector.detect(frame).unwrap_or_else(|err| {
+            log::warn!("palm detection failed: {err:?}");
+            Vec::new()
+        });
+
+        if palm_regions.is_empty() {
+            return Ok(HandposeOutput {
+                raw_landmarks: Vec::new(),
+                projected_landmarks: Vec::new(),
+                confidence: 0.0,
+                handedness: 0.0,
+                palm_regions,
+            });
+        }
+
+        let selected = pick_primary_region(&palm_regions)
+            .unwrap_or_else(|| palm_regions.get(0).expect("palm detection list not empty"));
+        let (center, side, angle) = crop_from_palm(selected);
+
+        let (input, transform) =
+            common::prepare_rotated_crop(frame, center, side, angle, common::INPUT_SIZE)?;
         let tensor = Tensor::from_array(input)?;
         let outputs = self
-            .session
+            .handpose
             .run(ort::inputs![tensor])
             .context("failed to run ORT session")?;
 
@@ -96,13 +143,14 @@ impl HandposeEngine for OrtEngine {
             0.0
         };
 
-        let projected = common::project_landmarks(&landmarks, &letterbox);
+        let projected = common::project_landmarks_with_transform(&landmarks, &transform);
 
         Ok(HandposeOutput {
             raw_landmarks: landmarks,
             projected_landmarks: projected,
-            confidence: confidence.clamp(0.0, 1.0),
+            confidence: (confidence * selected.score).clamp(0.0, 1.0),
             handedness,
+            palm_regions,
         })
     }
 }

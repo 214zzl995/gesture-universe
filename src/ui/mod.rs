@@ -17,7 +17,9 @@ use gpui_component::{ActiveTheme, Root, StyledExt, button::Button, h_flex, v_fle
 use image::{Frame as ImageFrame, ImageBuffer, Rgba};
 
 use crate::{
-    model_download::{DownloadEvent, ensure_model_available_with_callback},
+    model_download::{
+        ModelDownloadEvent, ModelKind,
+    },
     pipeline::{
         CameraDevice, CameraStream, CompositedFrame, RecognizerBackend, start_frame_compositor,
         start_recognizer,
@@ -41,8 +43,8 @@ const STARTUP_CARD_WIDTH: f32 = 420.0;
 
 pub fn launch_ui(
     app: &mut App,
-    frame_to_rec_rx: Receiver<Frame>,
-    frame_to_rec_tx: Sender<Frame>,
+    camera_frame_rx: Receiver<Frame>,
+    camera_frame_tx: Sender<Frame>,
     recognizer_backend: RecognizerBackend,
 ) -> gpui::Result<()> {
     let window_options = WindowOptions {
@@ -63,7 +65,8 @@ pub fn launch_ui(
     };
 
     app.open_window(window_options, move |window, app| {
-        let view = app.new(|_| AppView::new(frame_to_rec_rx, frame_to_rec_tx, recognizer_backend));
+        let view =
+            app.new(|_| AppView::new(camera_frame_rx, camera_frame_tx, recognizer_backend));
         app.new(|cx| {
             let root = Root::new(view, window, cx);
             #[cfg(target_os = "macos")]
@@ -81,8 +84,8 @@ pub fn launch_ui(
 struct AppView {
     screen: Screen,
     composited_rx: Option<Receiver<CompositedFrame>>,
-    frame_to_rec_rx: Option<Receiver<Frame>>,
-    frame_to_rec_tx: Sender<Frame>,
+    camera_frame_rx: Option<Receiver<Frame>>,
+    camera_frame_tx: Sender<Frame>,
     recognized_tx: Sender<RecognizedFrame>,
     recognizer_backend: RecognizerBackend,
     _frame_compositor_handle: thread::JoinHandle<()>,
@@ -128,6 +131,9 @@ struct DownloadState {
     message: String,
     error: Option<String>,
     finished: bool,
+    handpose_ready: bool,
+    palm_ready: bool,
+    current_model: Option<ModelKind>,
     start_time: Instant,
 }
 
@@ -139,13 +145,65 @@ impl DownloadState {
             message: "Preparing model download...".to_string(),
             error: None,
             finished: false,
+            handpose_ready: false,
+            palm_ready: false,
+            current_model: None,
             start_time: Instant::now(),
+        }
+    }
+
+    fn update_from_event(&mut self, event: ModelDownloadEvent) {
+        match event {
+            ModelDownloadEvent::AlreadyPresent { model } => {
+                self.message = format!(
+                    "{} model already present, continuing...",
+                    model_label(model)
+                );
+                self.set_ready(model);
+                self.downloaded = 0;
+                self.total = None;
+            }
+            ModelDownloadEvent::Started { model, total } => {
+                self.current_model = Some(model);
+                self.downloaded = 0;
+                self.total = total;
+                self.message = format!("Downloading {} model...", model_label(model));
+            }
+            ModelDownloadEvent::Progress {
+                model,
+                downloaded,
+                total,
+            } => {
+                self.current_model = Some(model);
+                self.downloaded = downloaded;
+                self.total = total;
+                self.message = format!("Downloading {} model...", model_label(model));
+            }
+            ModelDownloadEvent::Finished { model } => {
+                self.set_ready(model);
+                self.message = format!("{} model ready", model_label(model));
+            }
+        }
+        self.finished = self.handpose_ready && self.palm_ready;
+    }
+
+    fn set_ready(&mut self, model: ModelKind) {
+        match model {
+            ModelKind::HandposeEstimator => self.handpose_ready = true,
+            ModelKind::PalmDetector => self.palm_ready = true,
         }
     }
 }
 
+fn model_label(model: ModelKind) -> &'static str {
+    match model {
+        ModelKind::HandposeEstimator => "Handpose estimator",
+        ModelKind::PalmDetector => "Palm detector",
+    }
+}
+
 enum DownloadMessage {
-    Event(DownloadEvent),
+    Event(ModelDownloadEvent),
     Error(String),
 }
 
@@ -156,8 +214,8 @@ struct PanelResizeState {
 
 impl AppView {
     fn new(
-        frame_to_rec_rx: Receiver<Frame>,
-        frame_to_rec_tx: Sender<Frame>,
+        camera_frame_rx: Receiver<Frame>,
+        camera_frame_tx: Sender<Frame>,
         recognizer_backend: RecognizerBackend,
     ) -> Self {
         let (recognized_tx, recognized_rx) = crossbeam_channel::bounded(1);
@@ -175,8 +233,8 @@ impl AppView {
         Self {
             screen: Screen::Download(DownloadState::new()),
             composited_rx: Some(composited_rx),
-            frame_to_rec_rx: Some(frame_to_rec_rx),
-            frame_to_rec_tx,
+            camera_frame_rx: Some(camera_frame_rx),
+            camera_frame_tx,
             recognized_tx,
             recognizer_backend,
             _frame_compositor_handle: compositor_handle,
@@ -204,7 +262,7 @@ impl AppView {
             return;
         }
 
-        let Some(frame_rx) = self.frame_to_rec_rx.take() else {
+        let Some(frame_rx) = self.camera_frame_rx.take() else {
             log::warn!("missing frame receiver for recognizer");
             return;
         };

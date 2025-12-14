@@ -1,7 +1,9 @@
 #[path = "../src/gesture.rs"]
 mod gesture;
+#[allow(dead_code)]
 #[path = "../src/model_download.rs"]
 mod model_download;
+#[allow(dead_code)]
 #[path = "../src/pipeline/recognizer/common.rs"]
 mod recognizer_common;
 #[allow(dead_code)]
@@ -34,8 +36,8 @@ fn main() -> Result<()> {
         anyhow::bail!("未找到可用的测试图片");
     }
 
-    let model_path = model_download::default_model_path();
-    model_download::ensure_model_available(&model_path)?;
+    let model_path = model_download::default_handpose_estimator_model_path();
+    model_download::ensure_handpose_estimator_model_ready(&model_path, |_evt| {})?;
     let mut model = HandposeModel::new(&model_path)?;
     let mut classifier = GestureClassifier::new();
 
@@ -101,7 +103,7 @@ struct HandposeModel {
 
 impl HandposeModel {
     fn new(model_path: &PathBuf) -> Result<Self> {
-        model_download::ensure_model_available(model_path)?;
+        model_download::ensure_handpose_estimator_model_ready(model_path, |_evt| {})?;
 
         let model = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
@@ -123,6 +125,7 @@ impl HandposeModel {
             projected_landmarks: projected,
             confidence: inference.confidence.clamp(0.0, 1.0),
             handedness: inference.handedness,
+            palm_regions: Vec::new(),
         })
     }
 }
