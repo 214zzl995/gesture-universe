@@ -245,24 +245,18 @@ pub fn pick_primary_region<'a>(regions: &'a [PalmRegion]) -> Option<&'a PalmRegi
 }
 
 pub fn crop_from_palm(region: &PalmRegion) -> ((f32, f32), f32, f32) {
-    let center = if region.landmarks.is_empty() {
-        (
-            (region.bbox[0] + region.bbox[2]) * 0.5,
-            (region.bbox[1] + region.bbox[3]) * 0.5,
-        )
-    } else {
-        let (sum_x, sum_y) = region
-            .landmarks
-            .iter()
-            .fold((0.0_f32, 0.0_f32), |acc, p| (acc.0 + p.0, acc.1 + p.1));
-        (
-            sum_x / region.landmarks.len() as f32,
-            sum_y / region.landmarks.len() as f32,
-        )
-    };
+    const SHIFT_Y: f32 = -0.4;
+    const ENLARGE_FACTOR: f32 = 3.0;
+
+    let bbox_center = (
+        (region.bbox[0] + region.bbox[2]) * 0.5,
+        (region.bbox[1] + region.bbox[3]) * 0.5,
+    );
 
     let base_w = (region.bbox[2] - region.bbox[0]).abs();
     let base_h = (region.bbox[3] - region.bbox[1]).abs();
+    let center = (bbox_center.0, bbox_center.1 + SHIFT_Y * base_h);
+
     let landmark_span = if region.landmarks.is_empty() {
         0.0
     } else {
@@ -274,57 +268,23 @@ pub fn crop_from_palm(region: &PalmRegion) -> ((f32, f32), f32, f32) {
             });
         (max_x - min_x).max(max_y - min_y)
     };
-    // Expand generously to avoid cropping fingers away.
-    let side = base_w.max(base_h).max(landmark_span).max(80.0) * 2.4;
 
+    let side = base_w.max(base_h).max(landmark_span).max(80.0) * ENLARGE_FACTOR;
     let angle = estimate_orientation(region);
 
     (center, side, angle)
 }
 
 pub fn estimate_orientation(region: &PalmRegion) -> f32 {
-    if region.landmarks.len() < 2 {
+    if region.landmarks.len() < 3 {
         return 0.0;
     }
 
-    // Principal direction via simple 2x2 covariance eigvec
-    let (cx, cy) = region
-        .landmarks
-        .iter()
-        .fold((0.0_f32, 0.0_f32), |acc, (x, y)| (acc.0 + x, acc.1 + y));
-    let mean = (
-        cx / region.landmarks.len() as f32,
-        cy / region.landmarks.len() as f32,
-    );
-
-    let mut cov_xx = 0.0;
-    let mut cov_xy = 0.0;
-    let mut cov_yy = 0.0;
-    for (x, y) in &region.landmarks {
-        let dx = x - mean.0;
-        let dy = y - mean.1;
-        cov_xx += dx * dx;
-        cov_xy += dx * dy;
-        cov_yy += dy * dy;
-    }
-    cov_xx /= region.landmarks.len() as f32;
-    cov_xy /= region.landmarks.len() as f32;
-    cov_yy /= region.landmarks.len() as f32;
-
-    let trace = cov_xx + cov_yy;
-    let det = cov_xx * cov_yy - cov_xy * cov_xy;
-    let lambda1 = (trace * 0.5 + ((trace * 0.5).powi(2) - det).max(0.0).sqrt()).max(1e-6);
-    let (vx, vy) = if cov_xy.abs() > 1e-6 {
-        (lambda1 - cov_yy, cov_xy)
-    } else if cov_xx >= cov_yy {
-        (1.0, 0.0)
-    } else {
-        (0.0, 1.0)
-    };
-
-    let angle = vy.atan2(vx);
-    // Rotate palm to face upwards (roughly) to help downstream model
-    angle - PI * 0.5
+    let p1 = region.landmarks[0];
+    let p2 = region.landmarks[2];
+    let radians = PI / 2.0 - (-(p2.1 - p1.1)).atan2(p2.0 - p1.0);
+    let two_pi = 2.0 * PI;
+    radians - two_pi * ((radians + PI) / two_pi).floor()
 }
 
 #[derive(Clone, Debug)]
