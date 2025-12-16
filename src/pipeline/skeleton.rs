@@ -28,9 +28,9 @@ pub const SKELETON_LINE_THICKNESS: i32 = 12;
 const PALM_BOX_THICKNESS: i32 = 6;
 const PALM_SCORE_THRESHOLD: f32 = 0.25;
 
-pub const DRAW_PALM_BBOX: bool = true;
-pub const DRAW_ENLARGED_BOX: bool = true;
-pub const DRAW_ROTATED_BOX: bool = true;
+pub const DRAW_PALM_BBOX: bool = false;
+pub const DRAW_ENLARGED_BOX: bool = false;
+pub const DRAW_ROTATED_BOX: bool = false;
 
 pub fn draw_skeleton(buffer: &mut [u8], width: u32, height: u32, points: &[(f32, f32)]) {
     if points.len() < 2 {
