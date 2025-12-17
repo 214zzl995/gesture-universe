@@ -14,7 +14,7 @@ const MAX_COMPOSITED_FPS: u64 = 30;
 const MIN_COMPOSITED_FPS: u64 = 12;
 const SLOWDOWN_FACTOR: f64 = 1.25;
 const RECOVERY_FACTOR: f64 = 0.85;
-const OVERLAY_CONFIDENCE_THRESHOLD: f32 = 0.5;
+const OVERLAY_CONFIDENCE_THRESHOLD: f32 = 0.2;
 
 #[derive(Clone, Debug)]
 pub struct CompositedFrame {

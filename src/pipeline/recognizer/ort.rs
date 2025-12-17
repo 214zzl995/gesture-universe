@@ -1,4 +1,8 @@
-use std::{path::PathBuf, thread};
+use std::{
+    path::PathBuf,
+    thread,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender};
@@ -66,6 +70,7 @@ pub fn start_worker(
 struct OrtEngine {
     handpose: Session,
     palm_detector: PalmDetector,
+    tracker: HandTracker,
 }
 
 impl OrtEngine {
@@ -82,18 +87,29 @@ impl OrtEngine {
         Ok(Self {
             handpose,
             palm_detector,
+            tracker: HandTracker::new(),
         })
     }
 }
 
 impl HandposeEngine for OrtEngine {
     fn infer(&mut self, frame: &Frame) -> Result<HandposeOutput> {
+        let now = frame.timestamp;
         let palm_regions = self.palm_detector.detect(frame).unwrap_or_else(|err| {
             log::warn!("palm detection failed: {err:?}");
             Vec::new()
         });
 
-        if palm_regions.is_empty() {
+        let mut used_tracking_fallback = false;
+        let (center, side, angle, prior_score) = if let Some(selected) =
+            pick_primary_region(&palm_regions).or_else(|| palm_regions.get(0))
+        {
+            let (center, side, angle) = crop_from_palm(selected);
+            (center, side, angle, selected.score)
+        } else if let Some((tracked, score)) = self.tracker.estimate_roi(now) {
+            used_tracking_fallback = true;
+            (tracked.0, tracked.1, tracked.2, score)
+        } else {
             return Ok(HandposeOutput {
                 raw_landmarks: Vec::new(),
                 projected_landmarks: Vec::new(),
@@ -101,11 +117,7 @@ impl HandposeEngine for OrtEngine {
                 handedness: 0.0,
                 palm_regions,
             });
-        }
-
-        let selected = pick_primary_region(&palm_regions)
-            .unwrap_or_else(|| palm_regions.get(0).expect("palm detection list not empty"));
-        let (center, side, angle) = crop_from_palm(selected);
+        };
 
         let (input, transform) =
             common::prepare_rotated_crop(frame, center, side, angle, common::INPUT_SIZE)?;
@@ -143,13 +155,129 @@ impl HandposeEngine for OrtEngine {
         };
 
         let projected = common::project_landmarks_with_transform(&landmarks, &transform);
+        let mut confidence = (confidence * prior_score).clamp(0.0, 1.0);
+        if used_tracking_fallback {
+            confidence *= 0.9;
+        }
+
+        if !landmarks.is_empty() {
+            self.tracker.update(&transform, &projected, confidence, now);
+        }
 
         Ok(HandposeOutput {
             raw_landmarks: landmarks,
             projected_landmarks: projected,
-            confidence: (confidence * selected.score).clamp(0.0, 1.0),
+            confidence,
             handedness,
             palm_regions,
         })
     }
+}
+
+// Keep a short-lived track so the hand does not disappear immediately when palm
+// detection drops (e.g. back-of-hand rotations).
+const TRACK_MAX_AGE: Duration = Duration::from_millis(450);
+const TRACK_MIN_CONF: f32 = 0.15;
+
+struct TrackedHand {
+    transform: common::CropTransform,
+    projected: Vec<(f32, f32)>,
+    confidence: f32,
+    last_seen: Instant,
+}
+
+impl TrackedHand {
+    fn is_stale(&self, now: Instant) -> bool {
+        now.duration_since(self.last_seen) > TRACK_MAX_AGE || self.confidence < TRACK_MIN_CONF
+    }
+
+    fn estimate_roi(&self) -> Option<((f32, f32), f32, f32)> {
+        if self.projected.len() < 3 {
+            return None;
+        }
+
+        let (min_x, max_x, min_y, max_y) = self
+            .projected
+            .iter()
+            .fold((f32::MAX, f32::MIN, f32::MAX, f32::MIN), |acc, (x, y)| {
+                (acc.0.min(*x), acc.1.max(*x), acc.2.min(*y), acc.3.max(*y))
+            });
+
+        if !min_x.is_finite() || !max_x.is_finite() || !min_y.is_finite() || !max_y.is_finite() {
+            return None;
+        }
+
+        let span = (max_x - min_x).max(max_y - min_y).max(1.0);
+        let expanded = span * 1.8;
+        let side = expanded
+            .max(self.transform.side * 0.7)
+            .min(self.transform.side * 2.5)
+            .max(80.0);
+
+        let center = ((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
+        let angle =
+            estimate_orientation_from_landmarks(&self.projected).unwrap_or(self.transform.angle);
+
+        Some((center, side, angle))
+    }
+}
+
+struct HandTracker {
+    last: Option<TrackedHand>,
+}
+
+impl HandTracker {
+    fn new() -> Self {
+        Self { last: None }
+    }
+
+    fn update(
+        &mut self,
+        transform: &common::CropTransform,
+        projected: &[(f32, f32)],
+        confidence: f32,
+        now: Instant,
+    ) {
+        if projected.is_empty() {
+            self.last = None;
+            return;
+        }
+
+        self.last = Some(TrackedHand {
+            transform: transform.clone(),
+            projected: projected.to_vec(),
+            confidence,
+            last_seen: now,
+        });
+    }
+
+    fn estimate_roi(&self, now: Instant) -> Option<(((f32, f32), f32, f32), f32)> {
+        let tracked = self.last.as_ref()?;
+        if tracked.is_stale(now) {
+            return None;
+        }
+        tracked.estimate_roi().map(|roi| (roi, tracked.confidence))
+    }
+}
+
+fn estimate_orientation_from_landmarks(points: &[(f32, f32)]) -> Option<f32> {
+    use std::f32::consts::PI;
+
+    if points.len() <= 17 {
+        return None;
+    }
+
+    let wrist = points[0];
+    let index = points[5];
+    let pinky = points[17];
+    let axis_x = ((index.0 + pinky.0) * 0.5) - wrist.0;
+    let axis_y = ((index.1 + pinky.1) * 0.5) - wrist.1;
+
+    if axis_x.abs() < f32::EPSILON && axis_y.abs() < f32::EPSILON {
+        return None;
+    }
+
+    let radians = PI / 2.0 - (-(axis_y)).atan2(axis_x);
+    let two_pi = 2.0 * PI;
+    Some(radians - two_pi * ((radians + PI) / two_pi).floor())
 }
