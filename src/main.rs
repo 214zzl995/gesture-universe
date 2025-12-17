@@ -15,7 +15,7 @@ use pipeline::RecognizerBackend;
 fn main() -> Result<()> {
     env_logger::init();
 
-    let (frame_to_rec_tx, frame_to_rec_rx) = bounded(1);
+    let (camera_frame_tx, camera_frame_rx) = bounded(1);
 
     let recognizer_backend = RecognizerBackend::default();
 
@@ -26,8 +26,8 @@ fn main() -> Result<()> {
 
             if let Err(err) = ui::launch_ui(
                 app,
-                frame_to_rec_rx,
-                frame_to_rec_tx,
+                camera_frame_rx,
+                camera_frame_tx,
                 recognizer_backend.clone(),
             ) {
                 eprintln!("failed to launch ui: {err:?}");

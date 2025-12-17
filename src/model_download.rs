@@ -9,57 +9,58 @@ use anyhow::Context;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::Client;
 
-const MODEL_FILENAME: &str = "handpose_estimation_mediapipe_2023feb.onnx";
-const MODEL_URL: &str = "https://raw.githubusercontent.com/214zzl995/gesture-universe/refs/heads/main/models/handpose_estimation_mediapipe_2023feb.onnx";
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelKind {
+    HandposeEstimator,
+    PalmDetector,
+}
 
-pub fn default_model_path() -> PathBuf {
-    PathBuf::from("models").join(MODEL_FILENAME)
+const HANDPOSE_ESTIMATOR_MODEL_FILENAME: &str = "handpose_estimation_mediapipe_2023feb.onnx";
+const HANDPOSE_ESTIMATOR_MODEL_URL: &str = "https://raw.githubusercontent.com/214zzl995/gesture-universe/refs/heads/main/models/handpose_estimation_mediapipe_2023feb.onnx";
+const PALM_DETECTOR_MODEL_FILENAME: &str = "palm_detection_mediapipe_2023feb.onnx";
+const PALM_DETECTOR_MODEL_URL: &str = "https://raw.githubusercontent.com/214zzl995/gesture-universe/refs/heads/main/models/palm_detection_mediapipe_2023feb.onnx";
+
+pub fn default_handpose_estimator_model_path() -> PathBuf {
+    PathBuf::from("models").join(HANDPOSE_ESTIMATOR_MODEL_FILENAME)
+}
+
+pub fn default_palm_detector_model_path() -> PathBuf {
+    PathBuf::from("models").join(PALM_DETECTOR_MODEL_FILENAME)
 }
 
 #[derive(Clone, Debug)]
-pub enum DownloadEvent {
-    AlreadyPresent,
+pub enum ModelDownloadEvent {
+    AlreadyPresent {
+        model: ModelKind,
+    },
     Started {
+        model: ModelKind,
         total: Option<u64>,
     },
     Progress {
+        model: ModelKind,
         downloaded: u64,
-        #[allow(dead_code)]
         total: Option<u64>,
     },
-    Finished,
+    Finished {
+        model: ModelKind,
+    },
 }
 
-pub fn ensure_model_available(model_path: &Path) -> anyhow::Result<()> {
-    let mut progress: Option<ProgressBar> = None;
-    ensure_model_available_with_callback(model_path, |event| match event {
-        DownloadEvent::AlreadyPresent => {}
-        DownloadEvent::Started { total } => {
-            progress = Some(create_progress_bar(total));
-        }
-        DownloadEvent::Progress { downloaded, .. } => {
-            if let Some(pb) = progress.as_ref() {
-                pb.set_position(downloaded);
-            }
-        }
-        DownloadEvent::Finished => {
-            if let Some(pb) = progress.take() {
-                pb.finish_with_message("handpose model ready");
-            }
-        }
-    })
-}
-
-pub fn ensure_model_available_with_callback<F>(
+pub fn ensure_handpose_estimator_model_ready<F>(
     model_path: &Path,
     mut on_event: F,
 ) -> anyhow::Result<()>
 where
-    F: FnMut(DownloadEvent),
+    F: FnMut(ModelDownloadEvent),
 {
     if model_path.exists() {
-        on_event(DownloadEvent::AlreadyPresent);
-        on_event(DownloadEvent::Finished);
+        on_event(ModelDownloadEvent::AlreadyPresent {
+            model: ModelKind::HandposeEstimator,
+        });
+        on_event(ModelDownloadEvent::Finished {
+            model: ModelKind::HandposeEstimator,
+        });
         return Ok(());
     }
 
@@ -68,15 +69,48 @@ where
             .with_context(|| format!("failed to create model directory {}", parent.display()))?;
     }
 
-    download_to_path(MODEL_URL, model_path, &mut on_event)
+    let mut progress: Option<ProgressBar> = None;
+    download_to_path(
+        ModelKind::HandposeEstimator,
+        HANDPOSE_ESTIMATOR_MODEL_URL,
+        model_path,
+        &mut |event| {
+            match &event {
+                ModelDownloadEvent::Started { total, .. } => {
+                    progress = Some(create_progress_bar(*total));
+                }
+                ModelDownloadEvent::Progress { downloaded, .. } => {
+                    if let Some(pb) = progress.as_ref() {
+                        pb.set_position(*downloaded);
+                    }
+                }
+                ModelDownloadEvent::Finished { .. } => {
+                    if let Some(pb) = progress.take() {
+                        pb.finish_with_message("handpose model ready");
+                    }
+                }
+                ModelDownloadEvent::AlreadyPresent { .. } => {}
+            }
+            on_event(event);
+        },
+    )
 }
 
-fn download_to_path<F>(url: &str, dest: &Path, on_event: &mut F) -> anyhow::Result<()>
+fn download_to_path<F>(
+    model: ModelKind,
+    url: &str,
+    dest: &Path,
+    on_event: &mut F,
+) -> anyhow::Result<()>
 where
-    F: FnMut(DownloadEvent),
+    F: FnMut(ModelDownloadEvent),
 {
+    let model_label = match model {
+        ModelKind::HandposeEstimator => "handpose estimator",
+        ModelKind::PalmDetector => "palm detector",
+    };
     log::info!(
-        "downloading handpose model from {url} to {}",
+        "downloading {model_label} model from {url} to {}",
         dest.display()
     );
 
@@ -84,12 +118,15 @@ where
     let mut response = client
         .get(url)
         .send()
-        .context("failed to start handpose model download")?
+        .context("failed to start model download")?
         .error_for_status()
-        .context("handpose model download returned error status")?;
+        .context("model download returned error status")?;
 
     let total_size = response.content_length();
-    on_event(DownloadEvent::Started { total: total_size });
+    on_event(ModelDownloadEvent::Started {
+        model,
+        total: total_size,
+    });
 
     let tmp_path = dest.with_extension("download");
     let mut file = fs::File::create(&tmp_path)
@@ -108,7 +145,8 @@ where
         file.write_all(&buffer[..bytes_read])
             .context("failed while writing model to disk")?;
         downloaded += bytes_read as u64;
-        on_event(DownloadEvent::Progress {
+        on_event(ModelDownloadEvent::Progress {
+            model,
             downloaded,
             total: total_size,
         });
@@ -124,8 +162,67 @@ where
         )
     })?;
 
-    on_event(DownloadEvent::Finished);
+    on_event(ModelDownloadEvent::Finished { model });
     Ok(())
+}
+
+pub fn ensure_palm_detector_model_ready<F>(model_path: &Path, mut on_event: F) -> anyhow::Result<()>
+where
+    F: FnMut(ModelDownloadEvent),
+{
+    if model_path.exists() {
+        on_event(ModelDownloadEvent::AlreadyPresent {
+            model: ModelKind::PalmDetector,
+        });
+        on_event(ModelDownloadEvent::Finished {
+            model: ModelKind::PalmDetector,
+        });
+        return Ok(());
+    }
+    if let Some(parent) = model_path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create palm detector model directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let bundled = Path::new("palm_detection_mediapipe").join(PALM_DETECTOR_MODEL_FILENAME);
+    if bundled.exists() {
+        on_event(ModelDownloadEvent::Started {
+            model: ModelKind::PalmDetector,
+            total: None,
+        });
+        fs::copy(&bundled, model_path).with_context(|| {
+            format!(
+                "failed to copy bundled palm detector model from {} to {}",
+                bundled.display(),
+                model_path.display()
+            )
+        })?;
+        on_event(ModelDownloadEvent::Finished {
+            model: ModelKind::PalmDetector,
+        });
+        return Ok(());
+    }
+
+    log::info!(
+        "bundled palm detector not found, downloading from {}",
+        PALM_DETECTOR_MODEL_URL
+    );
+    download_to_path(
+        ModelKind::PalmDetector,
+        PALM_DETECTOR_MODEL_URL,
+        model_path,
+        &mut on_event,
+    )
+    .with_context(|| {
+        format!(
+            "failed to download palm detector model to {}",
+            model_path.display()
+        )
+    })
 }
 
 fn create_progress_bar(total_size: Option<u64>) -> ProgressBar {
@@ -142,8 +239,7 @@ fn create_progress_bar(total_size: Option<u64>) -> ProgressBar {
         }
         _ => {
             let pb = ProgressBar::new_spinner();
-            let style = ProgressStyle::with_template("{spinner:.green} downloading handpose model")
-                .unwrap();
+            let style = ProgressStyle::with_template("{spinner:.green} downloading model").unwrap();
             pb.set_style(style);
             pb.enable_steady_tick(Duration::from_millis(100));
             pb

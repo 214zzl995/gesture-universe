@@ -1,7 +1,9 @@
 use super::{
-    AnyElement, AppView, Context, DownloadEvent, DownloadMessage, DownloadState, IntoElement,
-    ParentElement, RecognizerBackend, Sender, Styled, StyledExt, div,
-    ensure_model_available_with_callback, h_flex, thread, v_flex,
+    AnyElement, AppView, Context, DownloadMessage, DownloadState, IntoElement, ParentElement,
+    RecognizerBackend, Sender, Styled, StyledExt, div, h_flex, thread, v_flex,
+};
+use crate::model_download::{
+    ensure_handpose_estimator_model_ready, ensure_palm_detector_model_ready,
 };
 use gpui::{SharedString, px};
 
@@ -9,22 +11,7 @@ impl AppView {
     pub(super) fn poll_download_events(&mut self, state: &mut DownloadState) {
         while let Ok(msg) = self.download_rx.try_recv() {
             match msg {
-                DownloadMessage::Event(DownloadEvent::AlreadyPresent) => {
-                    state.message = "Model already present, launching app...".to_string();
-                }
-                DownloadMessage::Event(DownloadEvent::Started { total }) => {
-                    state.total = total;
-                    state.message = "Downloading handpose model...".to_string();
-                }
-                DownloadMessage::Event(DownloadEvent::Progress { downloaded, total }) => {
-                    state.downloaded = downloaded;
-                    state.total = total;
-                    state.message = "Downloading handpose model...".to_string();
-                }
-                DownloadMessage::Event(DownloadEvent::Finished) => {
-                    state.finished = true;
-                    state.message = "Model ready, starting app...".to_string();
-                }
+                DownloadMessage::Event(event) => state.update_from_event(event),
                 DownloadMessage::Error(err) => {
                     state.error = Some(err);
                     state.finished = false;
@@ -158,11 +145,20 @@ pub(super) fn spawn_model_download(
     tx: Sender<DownloadMessage>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let model_path = backend.model_path();
+        let handpose_estimator_model_path = backend.handpose_estimator_model_path();
+        let palm_detector_model_path = backend.palm_detector_model_path();
 
-        let result = ensure_model_available_with_callback(&model_path, |event| {
+        if let Err(err) = ensure_palm_detector_model_ready(&palm_detector_model_path, |event| {
             let _ = tx.send(DownloadMessage::Event(event));
-        });
+        }) {
+            log::error!("failed to prepare palm detector model: {err:?}");
+            let _ = tx.send(DownloadMessage::Error(format!("{err:#}")));
+            return;
+        }
+        let result =
+            ensure_handpose_estimator_model_ready(&handpose_estimator_model_path, |event| {
+                let _ = tx.send(DownloadMessage::Event(event));
+            });
 
         if let Err(err) = result {
             log::error!("failed to download model: {err:?}");

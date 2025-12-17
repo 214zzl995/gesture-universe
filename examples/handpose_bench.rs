@@ -1,9 +1,12 @@
+#[allow(dead_code)]
 #[path = "../src/model_download.rs"]
 mod model_download;
 
 use anyhow::{Context, Result};
 use image::{RgbaImage, imageops::FilterType};
-use model_download::{default_model_path, ensure_model_available};
+use model_download::{
+    default_handpose_estimator_model_path, ensure_handpose_estimator_model_ready,
+};
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -36,11 +39,11 @@ fn main() -> Result<()> {
     let model_path = args
         .next()
         .map(PathBuf::from)
-        .unwrap_or_else(default_model_path);
+        .unwrap_or_else(default_handpose_estimator_model_path);
     let duration_secs = args.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
 
     let input_tensor = prepare_tensor(&input_image).context("failed to read input image")?;
-    ensure_model_available(&model_path)?;
+    ensure_handpose_estimator_model_ready(&model_path, |_evt| {})?;
     let mut model = load_model(&model_path)?;
 
     println!(

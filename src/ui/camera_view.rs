@@ -551,7 +551,7 @@ impl AppView {
     fn start_camera_for_device(&mut self, device: &CameraDevice) -> Result<(), String> {
         self.stop_camera_stream();
 
-        pipeline::start_camera_stream(device.index.clone(), self.frame_to_rec_tx.clone())
+        pipeline::start_camera_stream(device.index.clone(), self.camera_frame_tx.clone())
             .map(|stream| {
                 self.camera_stream = Some(stream);
                 self.latest_frame = None;

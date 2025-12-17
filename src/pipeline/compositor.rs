@@ -47,6 +47,14 @@ fn compositor_loop(
         let result = recognized.result;
 
         let compose_start = Instant::now();
+        if !result.palm_regions.is_empty() {
+            skeleton::draw_palm_regions(
+                &mut frame.rgba,
+                frame.width,
+                frame.height,
+                &result.palm_regions,
+            );
+        }
         if let Some(points) = overlay_points(&result) {
             skeleton::draw_skeleton(&mut frame.rgba, frame.width, frame.height, points);
         }

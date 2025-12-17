@@ -110,7 +110,7 @@ fn build_camera(index: CameraIndex) -> Result<Camera> {
     Err(last_err.unwrap_or_else(|| anyhow!("failed to open camera with any supported format")))
 }
 
-pub fn start_camera_stream(index: CameraIndex, recog_tx: Sender<Frame>) -> Result<CameraStream> {
+pub fn start_camera_stream(index: CameraIndex, frame_tx: Sender<Frame>) -> Result<CameraStream> {
     // Fail fast before spawning the capture thread.
     build_camera(index.clone())?;
 
@@ -139,17 +139,10 @@ pub fn start_camera_stream(index: CameraIndex, recog_tx: Sender<Frame>) -> Resul
                 }
             };
 
-            let frame_format = frame.source_frame_format();
-            log::debug!("camera frame raw format: {frame_format}");
-
-            let decode_start = Instant::now();
             let converted = match rgba_converter::convert_camera_frame(&frame) {
                 Ok(rgba) => rgba,
                 Err(err) => {
-                    log::warn!(
-                        "failed to decode camera frame (after {:?}): {err:?}",
-                        decode_start.elapsed()
-                    );
+                    log::warn!("failed to decode camera frame {err:?}");
                     continue;
                 }
             };
@@ -163,7 +156,7 @@ pub fn start_camera_stream(index: CameraIndex, recog_tx: Sender<Frame>) -> Resul
             };
 
             // Drop if the worker is busy, otherwise forward every frame.
-            let _ = recog_tx.try_send(frame);
+            let _ = frame_tx.try_send(frame);
         }
     });
 

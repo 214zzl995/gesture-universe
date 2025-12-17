@@ -17,6 +17,14 @@ pub struct GestureResult {
     pub timestamp: Instant,
     pub landmarks: Option<Vec<(f32, f32)>>,
     pub detail: Option<GestureDetail>,
+    pub palm_regions: Vec<PalmRegion>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PalmRegion {
+    pub bbox: [f32; 4],
+    pub landmarks: Vec<(f32, f32)>,
+    pub score: f32,
 }
 
 #[derive(Clone, Debug)]

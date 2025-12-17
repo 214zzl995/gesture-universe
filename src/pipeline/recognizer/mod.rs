@@ -1,5 +1,6 @@
 mod common;
 mod ort;
+pub(crate) mod palm;
 
 use std::{path::PathBuf, thread};
 
@@ -7,7 +8,7 @@ use crossbeam_channel::{Receiver, Sender};
 
 use crate::{
     gesture::GestureClassifier,
-    model_download::default_model_path,
+    model_download::{default_handpose_estimator_model_path, default_palm_detector_model_path},
     types::{Frame, GestureResult, RecognizedFrame},
 };
 
@@ -51,15 +52,20 @@ fn recv_latest_frame(frame_rx: &Receiver<Frame>) -> Option<Frame> {
 
 #[derive(Clone, Debug)]
 pub struct RecognizerBackend {
-    model_path: PathBuf,
+    handpose_estimator_model_path: PathBuf,
+    palm_detector_model_path: PathBuf,
 }
 
 impl RecognizerBackend {
-    pub fn model_path(&self) -> PathBuf {
-        self.model_path.clone()
+    pub fn handpose_estimator_model_path(&self) -> PathBuf {
+        self.handpose_estimator_model_path.clone()
     }
 
-    pub fn label(&self) -> &'static str {
+    pub fn palm_detector_model_path(&self) -> PathBuf {
+        self.palm_detector_model_path.clone()
+    }
+
+    pub fn backend_label(&self) -> &'static str {
         "ort"
     }
 }
@@ -67,7 +73,8 @@ impl RecognizerBackend {
 impl Default for RecognizerBackend {
     fn default() -> Self {
         RecognizerBackend {
-            model_path: default_model_path(),
+            handpose_estimator_model_path: default_handpose_estimator_model_path(),
+            palm_detector_model_path: default_palm_detector_model_path(),
         }
     }
 }
@@ -77,9 +84,9 @@ pub fn start_recognizer(
     frame_rx: Receiver<Frame>,
     result_tx: Sender<RecognizedFrame>,
 ) -> thread::JoinHandle<()> {
-    log::info!("starting handpose backend: {}", backend.label());
+    log::info!("starting handpose backend: {}", backend.backend_label());
 
-    ort::start_worker(backend.model_path(), frame_rx, result_tx)
+    ort::start_worker(backend, frame_rx, result_tx)
 }
 
 pub(crate) fn build_gesture_result(
@@ -121,5 +128,6 @@ pub(crate) fn build_gesture_result(
             None
         },
         detail,
+        palm_regions: output.palm_regions,
     }
 }
